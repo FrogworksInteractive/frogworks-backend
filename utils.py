@@ -6,6 +6,8 @@ from datetime import date
 
 from structures.application_key import ApplicationKey
 from structures.application_session import ApplicationSession
+from structures.application_version import ApplicationVersion
+from structures.cloud_data import CloudData
 from structures.deposit import Deposit
 from structures.friend import Friend
 from structures.friend_request import FriendRequest
@@ -15,7 +17,9 @@ from structures.photo import Photo
 from structures.purchase import Purchase
 from structures.sale import Sale
 from structures.session import Session
+from structures.structure import Structure
 from structures.transaction import Transaction
+from structures.user import User
 
 
 class Utils:
@@ -24,6 +28,10 @@ class Utils:
         # Return a product key (UUID) with the format:
         # XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
         return str(uuid.uuid4()).upper()
+
+    @staticmethod
+    def generate_uuid4() -> str:
+        return uuid.uuid4().hex
 
     @staticmethod
     def generate_session_identifier() -> str:
@@ -87,6 +95,77 @@ class Utils:
             return default
 
     @staticmethod
+    def safe_bool_cast(value, default: bool = False) -> bool:
+        if str(value).lower() in ['true', 'false']:
+            return str(value).lower() == 'true'
+
+        try:
+            return bool(value)
+        except ValueError:
+            return default
+
+    @staticmethod
+    def serialize(item, private: bool):
+        if isinstance(item, Structure):
+            return item.into_dict(private)
+        elif isinstance(item, bool):
+            return 'true' if item else 'false'
+        elif isinstance(item, dict):
+            # Copy the dictionary to avoid issues because Python is special.
+            item_copy = item.copy()
+
+            # Loop through the dictionary contents, serializing them along the way.
+            for key, value in item_copy.items():
+                item_copy[key] = Utils.serialize(value, private)
+
+            return item_copy
+        elif isinstance(item, list):
+            serialized_item = []
+
+            # Loop through and serialize every item in the array.
+            for i in item:
+                serialized_item.append(Utils.serialize(i, private))
+
+            return serialized_item
+        elif type(item) in [int, float]:
+            return item
+
+        # As a catch-all, turn the item into a string.
+        # This will work for dates and whatever else gets to this point.
+        # Custom logic can be implemented for anything that should not get to this point, in the above if-elseif chain.
+        return str(item)
+
+    @staticmethod
+    def row_to_user(row: dict) -> User:
+        return User(
+            row['id'],
+            row['identifier'],
+            row['username'],
+            row['name'],
+            row['email_address'],
+            row['password'],
+            row['joined'],
+            row['balance'],
+            row['profile_photo_id'],
+            row['activity'],
+            row['developer'],
+            row['administrator'],
+            row['verified']
+        )
+
+    @staticmethod
+    def row_to_application_version(row: dict) -> ApplicationVersion:
+        return ApplicationVersion(
+            row['id'],
+            row['application_id'],
+            row['name'],
+            row['platform'],
+            row['release_date'],
+            row['filename'],
+            row['executable']
+        )
+
+    @staticmethod
     def row_to_sale(row: dict) -> Sale:
         return Sale(
             row['id'],
@@ -139,7 +218,8 @@ class Utils:
             row['application_id'],
             row['key'],
             row['type'],
-            row['redeemed']
+            row['redeemed'],
+            row['user_id']
         )
 
     @staticmethod
@@ -212,4 +292,14 @@ class Utils:
             row['description'],
             row['price'],
             row['data']
+        )
+
+    @staticmethod
+    def row_to_cloud_data(row: dict) -> CloudData:
+        return CloudData(
+            row['id'],
+            row['user_id'],
+            row['application_id'],
+            row['data'],
+            row['date']
         )
