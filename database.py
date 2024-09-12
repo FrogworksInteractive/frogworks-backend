@@ -9,6 +9,7 @@ from structures.application import Application
 from structures.application_key import ApplicationKey
 from structures.application_session import ApplicationSession
 from structures.application_version import ApplicationVersion
+from structures.cloud_data import CloudData
 from structures.deposit import Deposit
 from structures.friend import Friend
 from structures.friend_request import FriendRequest
@@ -52,7 +53,10 @@ class Database:
                 `joined` DATE NOT NULL,
                 `balance` TEXT NOT NULL,
                 `profile_photo_id` INTEGER NOT NULL,
-                `activity` TEXT NOT NULL -- JSON information.
+                `activity` TEXT NOT NULL, -- JSON information.
+                `developer` BOOLEAN NOT NULL,
+                `administrator` BOOLEAN NOT NULL,
+                `verified` BOOLEAN NOT NULL
             )
             ''')
 
@@ -81,7 +85,8 @@ class Database:
                 `name` TEXT NOT NULL,
                 `platform` TEXT NOT NULL,
                 `release_date` DATE NOT NULL,
-                `filename` TEXT NOT NULL
+                `filename` TEXT NOT NULL,
+                `executable` TEXT NOT NULL
             )
             ''')
 
@@ -137,7 +142,8 @@ class Database:
                 `application_id` INTEGER NOT NULL,
                 `key` TEXT NOT NULL,
                 `type` TEXT NOT NULL, -- purchase, creator
-                `redeemed` BOOLEAN NOT NULL
+                `redeemed` BOOLEAN NOT NULL,
+                `user_id` INTEGER NOT NULL
             )
             ''')
 
@@ -221,6 +227,16 @@ class Database:
             )
             ''')
 
+            self.cursor.execute('''
+            CREATE TABLE IF NOT EXISTS `cloud_data` (
+                `id` INTEGER PRIMARY KEY AUTOINCREMENT,
+                `user_id` INTEGER NOT NULL,
+                `application_id` INTEGER NOT NULL,
+                `data` TEXT NOT NULL,
+                `date` DATE NOT NULL
+            )
+            ''')
+
         self.initialized = True
 
     def username_taken(self, username: str) -> bool:
@@ -285,7 +301,7 @@ class Database:
         return not row is None
 
     def create_user(self, username: str, name: str, email_address: str, password: str,
-                    email_verification_code: int) -> tuple[bool, dict]:
+                    email_verification_code: int, administrator: bool = False) -> tuple[bool, dict]:
         # Perform the pre-registration checks.
         if self.username_taken(username):
             return False, {'details': 'This username is already taken.'}
@@ -312,9 +328,9 @@ class Database:
 
         # Create the user's account.
         self.cursor.execute('''
-        INSERT INTO `users` (`identifier`, `username`, `name`, `email_address`, `password`, `joined`, `balance`, `profile_photo_id`, `activity`)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (identifier, username, name, email_address, hashed_password, current_date, balance, profile_photo_id, json.dumps(activity)))
+        INSERT INTO `users` (`identifier`, `username`, `name`, `email_address`, `password`, `joined`, `balance`, `profile_photo_id`, `activity`, `developer`, `administrator`, `verified`)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (identifier, username, name, email_address, hashed_password, current_date, balance, profile_photo_id, json.dumps(activity), False, administrator, False))
 
         # Commit the changes.
         self.connection.commit()
@@ -333,21 +349,10 @@ class Database:
         if row is None:
             return None
 
-        return User(
-            row['id'],
-            row['identifier'],
-            row['username'],
-            row['name'],
-            row['email_address'],
-            row['password'],
-            row['joined'],
-            row['balance'],
-            row['profile_photo_id'],
-            row['activity']
-        )
+        return Utils.row_to_user(row)
 
     def create_application(self, name: str, package_name: str, type_: str, description: str, release_date: date,
-                           early_access: bool,latest_version: str, supported_platforms: list, genres: list, tags: list,
+                           early_access: bool, latest_version: str, supported_platforms: list, genres: list, tags: list,
                            base_price: float, owners: list) -> tuple[bool, dict]:
         # Make sure the package name is not taken.
         if self.package_name_taken(package_name):
@@ -371,7 +376,7 @@ class Database:
         # Commit the changes.
         self.connection.commit()
 
-        return True, {'details': 'Application created successfully.'}
+        return True, {'details': 'Application created successfully.', 'application_id': self.cursor.lastrowid}
 
     def get_application(self, identifier, identifier_type: str = 'id') -> Application | None:
         # Ensure that the identifier type is valid.
@@ -400,8 +405,15 @@ class Database:
             row['owners']
         )
 
+    def update_application_property(self, application_id: int, property_: str, value):
+        # Attempt to update the specified application.
+        self.cursor.execute(f'UPDATE `applications` SET `{property_}` = ? WHERE `id` = ?', (value, application_id))
+
+        # Commit the changes.
+        self.connection.commit()
+
     def create_application_version(self, application_id: int, name: str, platform: str, release_date: date,
-                                   filename: str) -> tuple[bool, dict]:
+                                   filename: str, executable: str) -> tuple[bool, dict]:
         # Make sure the version does not already exist.
         fetched_version = self.get_application_version(application_id, name, platform)
 
@@ -410,9 +422,9 @@ class Database:
 
         # The version does not exist; proceed with the creation.
         self.cursor.execute('''
-        INSERT INTO `application_versions` (`application_id`, `name`, `platform`, `release_date`, `filename`)
-        VALUES (?, ?, ?, ?, ?)
-        ''', (application_id, name, platform, release_date, filename))
+        INSERT INTO `application_versions` (`application_id`, `name`, `platform`, `release_date`, `filename`, `executable`)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ''', (application_id, name, platform, release_date, filename, executable))
 
         # Commit the changes.
         self.connection.commit()
@@ -422,20 +434,45 @@ class Database:
     def get_application_version(self, application_id: int, version_name: str,
                                 platform: str) -> ApplicationVersion | None:
         # Attempt to get an application version that matches the provided application, version name, and platform.
-        self.cursor.execute('''SELECT * FROM `application_versions` WHERE `application_id` = ? AND `name` = ? AND `platform` = ? COLLATE NOCASE`''', (application_id, version_name, platform))
+        self.cursor.execute('''SELECT * FROM `application_versions` WHERE `application_id` = ? AND `name` = ? AND `platform` = ? COLLATE NOCASE''', (application_id, version_name, platform))
         row = self.cursor.fetchone()
 
         if row is None:
             return None
 
-        return ApplicationVersion(
-            row['id'],
-            row['application_id'],
-            row['name'],
-            row['platform'],
-            row['release_date'],
-            row['filename']
-        )
+        return Utils.row_to_application_version(row)
+
+    def get_application_versions(self, application_id: int) -> list[ApplicationVersion]:
+        versions: list[ApplicationVersion] = []
+
+        # Fetch all versions for a specified application.
+        self.cursor.execute('SELECT * FROM `application_versions` WHERE `application_id` = ?', (application_id,))
+
+        for row in self.cursor.fetchall():
+            versions.append(Utils.row_to_application_version(row))
+
+        return versions
+
+    def get_application_versions_for_platform(self, application_id: int, platform: str) -> list[ApplicationVersion]:
+        versions: list[ApplicationVersion] = []
+
+        # Fetch all versions for a specified application.
+        self.cursor.execute('SELECT * FROM `application_versions` WHERE `application_id` = ? AND `platform` = ?', (application_id, platform))
+
+        for row in self.cursor.fetchall():
+            versions.append(Utils.row_to_application_version(row))
+
+        return versions
+
+    def get_application_version_by_id(self, version_id: int) -> ApplicationVersion | None:
+        # Attempt to get an application version from the provided id.
+        self.cursor.execute('SELECT * FROM `application_versions` WHERE `id` = ?', (version_id,))
+        row = self.cursor.fetchone()
+
+        if row is None:
+            return None
+
+        return Utils.row_to_application_version(row)
 
     def create_sale(self, application_id: int, title: str, description: str, price: float, start_date: date,
                     end_date: date) -> tuple[bool, dict]:
@@ -583,9 +620,42 @@ class Database:
 
         return True, {'details': 'Application key created successfully.', 'key': key, 'id': self.cursor.lastrowid}
 
-    def get_application_key(self, key: str) -> ApplicationKey | None:
+    def get_application_key(self, identifier, identifier_type: str = 'key') -> ApplicationKey | None:
+        # Ensure that the identifier type is valid.
+        if not identifier_type in ['id', 'key']:
+            return None
+
         # Attempt to fetch the requested application key.
-        self.cursor.execute('SELECT * FROM `application_keys` WHERE `key` = ? COLLATE NOCASE', (key,))
+        self.cursor.execute(f'SELECT * FROM `application_keys` WHERE `{identifier_type}` = ? COLLATE NOCASE', (identifier,))
+        row = self.cursor.fetchone()
+
+        if row is None:
+            return None
+
+        return Utils.row_to_application_key(row)
+
+    def delete_application_key(self, id_: int):
+        # Attempt to delete the application key.
+        self.cursor.execute('DELETE FROM `application_keys` WHERE `id` = ?', (id_,))
+
+        # Commit the changes.
+        self.connection.commit()
+
+    def get_user_application_keys(self, user_id: int) -> list[ApplicationKey]:
+        application_keys: list[ApplicationKey] = []
+
+        # Fetch all application keys that belong to a user.
+        self.cursor.execute('SELECT * FROM `application_keys` WHERE `user_id` = ?', (user_id,))
+
+        # Loops through the keys.
+        for row in self.cursor.fetchall():
+            application_keys.append(Utils.row_to_application_key(row))
+
+        return application_keys
+
+    def get_application_key_for(self, user_id: int, application_id: int) -> ApplicationKey | None:
+        # Attempt to get an application key from the specified user and application ids.
+        self.cursor.execute('SELECT * FROM `application_keys` WHERE `user_id` = ? AND `application_id` = ?', (user_id, application_id))
         row = self.cursor.fetchone()
 
         if row is None:
@@ -950,3 +1020,39 @@ class Database:
             iaps.append(Utils.row_to_iap(row))
 
         return iaps
+
+    def create_cloud_data(self, user_id: int, application_id: int, data: dict):
+        # Delete all previous cloud data entries for that user and application id.
+        self.cursor.execute('DELETE FROM `cloud_data` WHERE `user_id` = ? AND `application_id` = ?', (user_id, application_id))
+
+        # Save the data.
+        self.cursor.execute('''
+        INSERT INTO `cloud_data` (`user_id`, `application_id`, `data`, `date`)
+        VALUES (?, ?, ?, ?)
+        ''', (user_id, application_id, json.dumps(data), date.today()))
+
+        # Commit the changes.
+        self.connection.commit()
+
+    def get_cloud_data(self, user_id: int, application_id: int) -> CloudData | None:
+        self.cursor.execute('SELECT * FROM `cloud_data` WHERE `user_id` = ? AND `application_id` = ?', (user_id, application_id))
+        row = self.cursor.fetchone()
+
+        if row is None:
+            return None
+
+        return Utils.row_to_cloud_data(row)
+
+    def delete_cloud_data(self, user_id: int, application_id: int):
+        # Delete the user's cloud data for the specified application.
+        self.cursor.execute('DELETE FROM `cloud_data` WHERE `user_id` = ? AND `application_id` = ?', (user_id, application_id))
+
+        # Commit the changes.
+        self.connection.commit()
+
+    def delete_application_cloud_data(self, application_id: int):
+        # Delete all the cloud data for the specified application.
+        self.cursor.execute('DELETE FROM `cloud_data` WHERE `application_id` = ?', (application_id,))
+
+        # Commit the changes.
+        self.connection.commit()
