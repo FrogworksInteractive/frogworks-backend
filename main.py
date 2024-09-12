@@ -6,16 +6,17 @@ from database import Database
 from email_manager import EmailManager
 
 
+email_manager = None
 database = None
 
 
 def main():
-    global database
+    global email_manager, database
 
     # Load the .env environment variables.
     load_dotenv()
 
-    # Initialize the email manager`
+    # Initialize the email manager.
     email_manager = EmailManager(os.getenv('EMAIL_ADDRESS'), os.getenv('APP_PASSWORD'), os.getenv('DISPLAY_NAME'))
 
     # Initialize the database.

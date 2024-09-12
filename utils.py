@@ -1,7 +1,21 @@
 import uuid
 import random
-
 import bcrypt
+
+from datetime import date
+
+from structures.application_key import ApplicationKey
+from structures.application_session import ApplicationSession
+from structures.deposit import Deposit
+from structures.friend import Friend
+from structures.friend_request import FriendRequest
+from structures.iap import IAP
+from structures.invite import Invite
+from structures.photo import Photo
+from structures.purchase import Purchase
+from structures.sale import Sale
+from structures.session import Session
+from structures.transaction import Transaction
 
 
 class Utils:
@@ -10,6 +24,10 @@ class Utils:
         # Return a product key (UUID) with the format:
         # XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
         return str(uuid.uuid4()).upper()
+
+    @staticmethod
+    def generate_session_identifier() -> str:
+        return uuid.uuid4().hex
 
     @staticmethod
     def hash_password(password: str) -> str:
@@ -49,3 +67,135 @@ class Utils:
             d[col[0]] = row[idx]
 
         return d
+
+    @staticmethod
+    def date_between(date_: date, start_date: date, end_date: date) -> bool:
+        return start_date <= date_ <= end_date
+
+    @staticmethod
+    def row_to_sale(row: dict) -> Sale:
+        return Sale(
+            row['id'],
+            row['application_id'],
+            row['title'],
+            row['description'],
+            row['price'],
+            row['start_date'],
+            row['end_date']
+        )
+
+    @staticmethod
+    def row_to_purchase(row: dict) -> Purchase:
+        return Purchase(
+            row['id'],
+            row['application_id'],
+            row['iap_id'],
+            row['user_id'],
+            row['type'],
+            row['source'],
+            row['price'],
+            row['key'],
+            row['date']
+        )
+
+    @staticmethod
+    def row_to_deposit(row: dict) -> Deposit:
+        return Deposit(
+            row['id'],
+            row['user_id'],
+            row['amount'],
+            row['source'],
+            row['date']
+        )
+
+    @staticmethod
+    def row_to_transaction(row: dict) -> Transaction:
+        return Transaction(
+            row['id'],
+            row['user_id'],
+            row['transaction_id'],
+            row['type'],
+            row['date']
+        )
+
+    @staticmethod
+    def row_to_application_key(row: dict) -> ApplicationKey:
+        return ApplicationKey(
+            row['id'],
+            row['application_id'],
+            row['key'],
+            row['type'],
+            row['redeemed']
+        )
+
+    @staticmethod
+    def row_to_friend_request(row: dict) -> FriendRequest:
+        return FriendRequest(
+            row['id'],
+            row['user_id'],
+            row['from_user_id'],
+            row['date']
+        )
+
+    @staticmethod
+    def row_to_friend(row: dict) -> Friend:
+        return Friend(
+            row['id'],
+            row['user_id'],
+            row['other_user_id'],
+            row['date']
+        )
+
+    @staticmethod
+    def row_to_session(row: dict) -> Session:
+        return Session(
+            row['id'],
+            row['identifier'],
+            row['user_id'],
+            row['hostname'],
+            row['mac_address'],
+            row['platform'],
+            row['start_date'],
+            row['last_activity'],
+        )
+
+    @staticmethod
+    def row_to_invite(row: dict) -> Invite:
+        return Invite(
+            row['id'],
+            row['user_id'],
+            row['from_user_id'],
+            row['application_id'],
+            row['details'],
+            row['date']
+        )
+
+    @staticmethod
+    def row_to_application_session(row: dict) -> ApplicationSession:
+        return ApplicationSession(
+            row['id'],
+            row['user_id'],
+            row['application_id'],
+            row['date'],
+            row['length']
+        )
+
+    @staticmethod
+    def row_to_photo(row: dict) -> Photo:
+        return Photo(
+            row['id'],
+            row['filename'],
+            row['subfolder'],
+            row['created_at']
+        )
+
+    @staticmethod
+    def row_to_iap(row: dict) -> IAP:
+        return IAP(
+            row['id'],
+            row['application_id'],
+            row['title'],
+            row['description'],
+            row['price'],
+            row['data']
+        )

@@ -3,7 +3,7 @@ from datetime import date
 
 
 class Sale:
-    def __init(self, id_: int, application_id: int, title: str, description: str, price: str, start_date: str,
+    def __init__(self, id_: int, application_id: int, title: str, description: str, price: str, start_date: str,
                end_date: str):
         self.id: int = id_
         self.application_id: int = application_id
