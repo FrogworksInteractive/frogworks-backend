@@ -33,7 +33,7 @@ class Database:
     def initialize(self):
         if not self.initialized:
             # Connect to the SQLite database.
-            self.connection = sqlite3.connect(self.path)
+            self.connection = sqlite3.connect(self.path, check_same_thread=False)
             self.cursor = self.connection.cursor()
 
             # Set the cursor's row factory so queries return dicts instead of arrays.
@@ -224,14 +224,14 @@ class Database:
 
     def username_taken(self, username: str) -> bool:
         # Check if a user exists with that username.
-        self.cursor.execute('SELECT FROM `users` WHERE `username` = ? COLLATE NOCASE', (username,))
+        self.cursor.execute('SELECT * FROM `users` WHERE `username` = ? COLLATE NOCASE', (username,))
         row = self.cursor.fetchone()
 
         return not row is None
 
     def email_taken(self, email: str) -> bool:
         # Check if a user exists with that email address.
-        self.cursor.execute('SELECT FROM `users` WHERE `email_address` = ? COLLATE NOCASE', (email,))
+        self.cursor.execute('SELECT * FROM `users` WHERE `email_address` = ? COLLATE NOCASE', (email,))
         row = self.cursor.fetchone()
 
         return not row is None
@@ -278,7 +278,7 @@ class Database:
 
     def package_name_taken(self, package_name: str) -> bool:
         # Check if an application exists with that package name.
-        self.cursor.execute('SELECT FROM `applications` WHERE `package_name` = ? COLLATE NOCASE', (package_name,))
+        self.cursor.execute('SELECT * FROM `applications` WHERE `package_name` = ? COLLATE NOCASE', (package_name,))
         row = self.cursor.fetchone()
 
         return not row is None

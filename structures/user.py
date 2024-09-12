@@ -1,7 +1,7 @@
 from datetime import datetime
 from datetime import date
 
-from activity import Activity
+from .activity import Activity
 
 
 class User:

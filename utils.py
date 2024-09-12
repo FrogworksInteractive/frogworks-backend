@@ -73,6 +73,20 @@ class Utils:
         return start_date <= date_ <= end_date
 
     @staticmethod
+    def safe_int_cast(value, default: int = 0) -> int:
+        try:
+            return int(value)
+        except ValueError:
+            return default
+
+    @staticmethod
+    def safe_float_cast(value, default: float = 0) -> float:
+        try:
+            return float(value)
+        except ValueError:
+            return default
+
+    @staticmethod
     def row_to_sale(row: dict) -> Sale:
         return Sale(
             row['id'],
