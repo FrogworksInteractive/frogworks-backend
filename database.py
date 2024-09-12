@@ -1,5 +1,6 @@
 import json
 import sqlite3
+
 from datetime import date
 
 from email_manager import EmailManager
@@ -764,6 +765,32 @@ class Database:
             return None
 
         return Utils.row_to_session(row)
+
+    def delete_session(self, id_: int):
+        # Delete the session.
+        self.cursor.execute('DELETE FROM `sessions` WHERE `id` = ?', (id_,))
+
+        # Commit the changes.
+        self.connection.commit()
+
+    def update_session_last_activity(self, id_: int, date_: date):
+        # Update the session.
+        self.cursor.execute('UPDATE `sessions` SET `last_activity` = ? WHERE `id` = ?', (date_, id_))
+
+        # Commit the changes.
+        self.connection.commit()
+
+    def get_sessions_for(self, user_id: int) -> list[Session]:
+        sessions: list[Session] = []
+
+        # Get all the specified user's sessions.
+        self.cursor.execute('SELECT * FROM `sessions` WHERE `user_id` = ?', (user_id,))
+
+        # Loop through all of them, and add them to the list.
+        for session in self.cursor.fetchall():
+            sessions.append(Utils.row_to_session(session))
+
+        return sessions
 
     def create_invite(self, user_id: int, from_user_id: int, application_id: int, details: dict,
                       date_: date):
