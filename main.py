@@ -207,6 +207,7 @@ def main():
     api.add_resource(Register, '/api/user/register')
     api.add_resource(Login, '/api/user/login')
     api.add_resource(AuthenticateSession, '/api/session/authenticate')
+    api.add_resource(DeleteSession, '/api/session/delete')
 
     # Run the HTTP server.
     app.run(
