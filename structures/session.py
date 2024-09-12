@@ -1,8 +1,12 @@
 from datetime import datetime
 from datetime import date
 
+from structures.structure import Structure
 
-class Session:
+
+class Session(Structure):
+    attributes = ['id', 'identifier', 'user_id', 'hostname', 'mac_address', 'platform', 'start_date', 'last_activity']
+
     def __init__(self, id_: int, identifier: str, user_id: int, hostname: str, mac_address: str, platform: str,
                  start_date: str, last_activity: str):
         self.id: int = id_

@@ -1,8 +1,12 @@
 from datetime import datetime
 from datetime import date
 
+from structures.structure import Structure
 
-class Sale:
+
+class Sale(Structure):
+    attributes = ['id', 'application_id', 'title', 'description', 'price', 'start_date', 'end_date']
+
     def __init__(self, id_: int, application_id: int, title: str, description: str, price: str, start_date: str,
                end_date: str):
         from utils import Utils

@@ -1,8 +1,12 @@
 from datetime import datetime
 from datetime import date
 
+from structures.structure import Structure
 
-class Deposit:
+
+class Deposit(Structure):
+    attributes = ['id', 'user_id', 'amount', 'source', 'date']
+
     def __init__(self, id_: int, user_id: int, amount: str, source: str, date_: str):
         from utils import Utils
 
