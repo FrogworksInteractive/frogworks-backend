@@ -157,23 +157,13 @@ class GetUser(APIResource):
         if missing:
             return {'missing_parameters': parameters}, 400
 
-        # Ensure that the user is authenticated.
-        authenticated, session_id = self.get_authentication()
+        success, response, response_code, session, user = self.verify_session(database)
 
-        if not authenticated:
-            return {}, 401
-
-        session = database.get_session(session_id)
-
-        if not session:
-            return {}, 403
+        if not success:
+            return response, response_code
 
         # Get the user.
         session_user = database.get_user(session.user_id)
-
-        # Ensure that the user has developer permissions.
-        if not session_user:
-            return {'details': 'The session\'s user does not exist.'}, 400
 
         # Get the parameters.
         user_id: int = Utils.safe_int_cast(request.form.get('user_id'))
@@ -233,24 +223,10 @@ class CreateApplication(APIResource):
                            'supported_platforms', 'genres', 'tags', 'base_price']
 
     def post(self):
-        missing, parameters = self.missing_parameters()
+        success, response, response_code, session, user = self.verify_session(database)
 
-        if missing:
-            return {'missing_parameters': parameters}, 400
-
-        # Ensure that the user is authenticated.
-        authenticated, session_id = self.get_authentication()
-
-        if not authenticated:
-            return {}, 401
-
-        session = database.get_session(session_id)
-
-        if not session:
-            return {}, 403
-
-        # Get the user.
-        user = database.get_user(session.user_id)
+        if not success:
+            return response, response_code
 
         # Ensure that the user has developer permissions.
         if not user:
@@ -298,33 +274,42 @@ class CreateApplication(APIResource):
         return {'details': 'Successfully created application.', 'application_id': response['application_id']}, 200
 
 
-class UpdateApplicationVersion(APIResource):
-    required_parameters = ['application_id', 'version']
+class GetApplication(APIResource):
+    required_parameters = ['application_id']
 
-    def put(self):
+    def get(self):
         missing, parameters = self.missing_parameters()
 
         if missing:
             return {'missing_parameters': parameters}, 400
 
-        # Ensure that the user is authenticated.
-        authenticated, session_id = self.get_authentication()
+        success, response, response_code, session, user = self.verify_session(database)
 
-        if not authenticated:
-            return {}, 401
+        if not success:
+            return response, response_code
 
-        session = database.get_session(session_id)
+        # Get the parameters.
+        application_id: int = Utils.safe_int_cast(request.form.get('application_id'))
 
-        if not session:
-            return {}, 403
+        # Get the application.
+        application = database.get_application(application_id)
 
-        # Get the user.
-        user = database.get_user(session.user_id)
+        if not application:
+            return {'details': 'The specified application does not exist.'}, 400
+
+        return application.into_dict(user.administrator or user.id in application.owners), 200
+
+
+class UpdateApplicationVersion(APIResource):
+    required_parameters = ['application_id', 'version']
+
+    def put(self):
+        success, response, response_code, session, user = self.verify_session(database)
+
+        if not success:
+            return response, response_code
 
         # Ensure that the user has developer permissions.
-        if not user:
-            return {'details': 'The session\'s user does not exist.'}, 400
-
         if not user.has_developer_permissions():
             return {'details': 'You are not a developer!'}, 403
 
@@ -353,28 +338,10 @@ class CreateVersion(APIResource):
     required_files = ['file']
 
     def post(self):
-        missing, parameters = self.missing_parameters()
+        success, response, response_code, session, user = self.verify_session(database)
 
-        if missing:
-            return {'missing_parameters': parameters}, 400
-
-        # Ensure that the user is authenticated.
-        authenticated, session_id = self.get_authentication()
-
-        if not authenticated:
-            return {}, 401
-
-        session = database.get_session(session_id)
-
-        if not session:
-            return {}, 403
-
-        # Get the user.
-        user = database.get_user(session.user_id)
-
-        # Ensure that the user has developer permissions.
-        if not user:
-            return {'details': 'The session\'s user does not exist.'}, 400
+        if not success:
+            return response, response_code
 
         if not user.has_developer_permissions():
             return {'details': 'You are not a developer!'}, 403
@@ -429,6 +396,21 @@ class CreateVersion(APIResource):
         return response, 200
 
 
+class GetVersions(APIResource):
+    required_parameters = ['application_id']
+
+    def get(self):
+        missing, parameters = self.missing_parameters()
+
+        if missing:
+            return {'missing_parameters': parameters}, 400
+
+        authenticated, session_id = self.get_authentication()
+
+        if not authenticated:
+            return {}, 401
+
+
 # Main method.
 def main():
     global email_manager, database, file_manager, app, api
@@ -464,6 +446,7 @@ def main():
     api.add_resource(AuthenticateSession, '/api/session/authenticate')
     api.add_resource(DeleteSession, '/api/session/delete')
     api.add_resource(CreateApplication, '/api/application/create')
+    api.add_resource(GetApplication, '/api/application/get')
     api.add_resource(UpdateApplicationVersion, '/api/application/update-version')
     api.add_resource(CreateVersion, '/api/version/create')
 
