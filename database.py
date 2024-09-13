@@ -1,7 +1,7 @@
 import json
 import sqlite3
 
-from datetime import date
+from datetime import date, datetime
 from loguru import logger
 
 from email_manager import EmailManager
@@ -400,21 +400,18 @@ class Database:
         if row is None:
             return None
 
-        return Application(
-            row['id'],
-            row['name'],
-            row['package_name'],
-            row['type'],
-            row['description'],
-            row['release_date'],
-            row['early_access'],
-            row['latest_version'],
-            row['supported_platforms'],
-            row['genres'],
-            row['tags'],
-            row['base_price'],
-            row['owners']
-        )
+        return Utils.row_to_application(row)
+
+    def get_all_applications(self) -> list[Application]:
+        # Fetch all applications.
+        applications: list[Application] = []
+
+        self.cursor.execute('SELECT * FROM `applications`')
+
+        for row in self.cursor.fetchall():
+            applications.append(Utils.row_to_application(row))
+
+        return applications
 
     def update_application_property(self, application_id: int, property_: str, value):
         # Attempt to update the specified application.
@@ -522,6 +519,21 @@ class Database:
 
         return True, {'details': 'Sale created successfully.'}
 
+    def delete_sale(self, id_: int) -> tuple[bool, dict]:
+        # Ensure that the sale exists.
+        if self.get_sale(id_) is None:
+            return False, {'details': 'Sale does not exist.'}
+
+        # Delete the sale.
+        self.cursor.execute('DELETE FROM `sales` WHERE `id` = ?', (id_,))
+
+        # Commit the changes.
+        self.connection.commit()
+
+        logger.info(f'Deleted sale: {id_}')
+
+        return True, {'details': 'Sale deleted successfully.'}
+
     def get_active_sale(self, application_id: int, active_date: date) -> Sale | None:
         # Get all sales for the specified application.
         self.cursor.execute('SELECT * FROM `sales` WHERE `application_id` = ?', (application_id,))
@@ -529,7 +541,10 @@ class Database:
         # Loop through all the sales, looking for one that is active during the specified date.
         for row in self.cursor.fetchall():
             # Check if the sale is active during the specified date.
-            if Utils.date_between(active_date, row['start_date'], row['end_date']):
+            start_date = datetime.strptime(row['start_date'], '%Y-%m-%d').date()
+            end_date = datetime.strptime(row['end_date'], '%Y-%m-%d').date()
+
+            if Utils.date_between(active_date, start_date, end_date):
                 return Utils.row_to_sale(row)
 
         return None
