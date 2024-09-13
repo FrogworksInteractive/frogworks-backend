@@ -17,6 +17,7 @@ from email_manager import EmailManager
 from api_resource import APIResource
 from file_manager import FileManager
 from structures.application_version import ApplicationVersion
+from structures.sale import Sale
 from structures.user import User
 from utils import Utils
 
@@ -394,7 +395,7 @@ class DownloadApplicationVersion(APIResource):
 
         # Verify that the user owns the specified application.
         if not database_utils.user_owns(user.id, version.application_id):
-            return {'details': 'You do not own this application.'}
+            return {'details': 'You do not own this application.'}, 403
 
         return send_file(file_manager.get_version_filepath(version_id))
 
@@ -462,7 +463,86 @@ class CreateVersion(APIResource):
         return response, 200
 
 
-class GetVersions(APIResource):
+class GetVersion(APIResource):
+    required_parameters = ['application_id', 'version_name', 'platform']
+
+    def get(self):
+        missing, parameters = self.missing_parameters()
+
+        if missing:
+            return {'missing_parameters': parameters}, 400
+
+        success, response, response_code, session, user = self.verify_session(database)
+
+        if not success:
+            return response, response_code
+
+        # Get the parameters.
+        application_id: int = Utils.safe_int_cast(request.form.get('application_id'))
+        version_name: str = request.form.get('version_name')
+        platform: str = request.form.get('platform')
+
+        # Verify that the user owns the specified application.
+        if not database_utils.user_owns(user.id, application_id):
+            return {'details': 'You do not own this application.'}, 403
+
+        # Get the version.
+        version = database.get_application_version(application_id, version_name, platform)
+
+        if not version:
+            return {'details': 'The specified version does not exist.'}, 400
+
+        # Get the application.
+        application = database.get_application(application_id)
+
+        return version.into_dict(user.administrator or user.id in application.owners), 200
+
+
+class CreateSale(APIResource):
+    required_parameters = ['application_id', 'title', 'description', 'price', 'start_date', 'end_date']
+
+    def post(self):
+        missing, parameters = self.missing_parameters()
+
+        if missing:
+            return {'missing_parameters': parameters}, 400
+
+        success, response, response_code, session, user = self.verify_session(database)
+
+        if not success:
+            return response, response_code
+
+        if not user.has_developer_permissions():
+            return {'details': 'You are not a developer!'}, 403
+
+        # Get the parameters.
+        application_id: int = Utils.safe_int_cast(request.form.get('application_id'))
+        title: str = request.form.get('title')
+        description: str = request.form.get('description')
+        price: float = Utils.safe_float_cast(request.form.get('price'))
+        start_date: date = datetime.strptime(request.form.get('start_date'), '%Y-%m-%d').date()
+        end_date: date = datetime.strptime(request.form.get('end_date'), '%Y-%m-%d').date()
+
+        # Ensure that the application exists.
+        # Get the application.
+        application = database.get_application(application_id)
+
+        if not application:
+            return {'details': 'The specified application does not exist.'}, 400
+
+        # Ensure that the user is an owner of this application.
+        if not user.id in application.owners:
+            return {'details': 'This is not your application; you cannot create sales for it.'}, 403
+
+        success, response = database.create_sale(application_id, title, description, price, start_date, end_date)
+
+        if success:
+            return response, 200
+
+        return response, 400
+
+
+class GetActiveSale(APIResource):
     required_parameters = ['application_id']
 
     def get(self):
@@ -471,10 +551,96 @@ class GetVersions(APIResource):
         if missing:
             return {'missing_parameters': parameters}, 400
 
-        authenticated, session_id = self.get_authentication()
+        success, response, response_code, session, user = self.verify_session(database)
 
-        if not authenticated:
-            return {}, 401
+        if not success:
+            return response, response_code
+
+        # Get the parameters.
+        application_id: int = Utils.safe_int_cast(request.form.get('application_id'))
+
+        # Ensure that the application exists.
+        application = database.get_application(application_id)
+
+        if not application:
+            return {'details': 'The specified application does not exist.'}, 400
+
+        # Attempt to find the active sale of a specific application.
+        sale = database.get_active_sale(application_id, date.today())
+
+        if not sale:
+            return {'details': 'The specified application is not currently on sale.'}, 400
+
+        return sale.into_dict(), 200
+
+
+class GetAllActiveSales(APIResource):
+    def get(self):
+        missing, parameters = self.missing_parameters()
+
+        if missing:
+            return {'missing_parameters': parameters}, 400
+
+        success, response, response_code, session, user = self.verify_session(database)
+
+        if not success:
+            return response, response_code
+
+        sales: list[Sale] = []
+
+        # Loop through all applications.
+        for application in database.get_all_applications():
+            # Attempt to grab the currently active sale for the application (if any).
+            active_sale = database.get_active_sale(application.id, date.today())
+
+            # If there is an active sale, add it to the list.
+            if active_sale:
+                sales.append(active_sale)
+
+        return {'sales': Utils.serialize(sales)}, 200
+
+
+class DeleteSale(APIResource):
+    required_parameters = ['sale_id']
+
+    def delete(self):
+        missing, parameters = self.missing_parameters()
+
+        if missing:
+            return {'missing_parameters': parameters}, 400
+
+        success, response, response_code, session, user = self.verify_session(database)
+
+        if not success:
+            return response, response_code
+
+        if not user.has_developer_permissions():
+            return {'details': 'You are not a developer!'}, 403
+
+        # Get the parameters.
+        sale_id: int = Utils.safe_int_cast(request.form.get('sale_id'))
+
+        # Ensure that the sale exists.
+        # Get the sale.
+        sale = database.get_sale(sale_id)
+
+        if not sale:
+            return {'details': 'The specified sale does not exist.'}, 400
+
+        # Get the application.
+        application = database.get_application(sale.application_id)
+
+        # Ensure that the user is an owner of this application.
+        if not user.id in application.owners:
+            return {'details': 'This is not your application; you cannot create sales for it.'}, 403
+
+        # Delete the sale.
+        success, response = database.delete_sale(sale_id)
+
+        if success:
+            return response, 200
+
+        return response, 400
 
 
 # Main method.
@@ -532,6 +698,10 @@ def main():
     api.add_resource(DownloadApplicationVersion, '/api/application/versions/download')
     api.add_resource(UpdateApplicationVersion, '/api/application/update-version')
     api.add_resource(CreateVersion, '/api/version/create')
+    api.add_resource(CreateSale, '/api/sales/create')
+    api.add_resource(GetActiveSale, '/api/sales/get')
+    api.add_resource(GetAllActiveSales, '/api/sales/get-all')
+    api.add_resource(DeleteSale, '/api/sales/delete')
 
     # Run the HTTP server.
     logger.info('Starting HTTP server.')
