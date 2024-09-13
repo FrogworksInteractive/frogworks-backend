@@ -4,6 +4,7 @@ import bcrypt
 
 from datetime import date
 
+from structures.application import Application
 from structures.application_key import ApplicationKey
 from structures.application_session import ApplicationSession
 from structures.application_version import ApplicationVersion
@@ -151,6 +152,24 @@ class Utils:
             row['developer'],
             row['administrator'],
             row['verified']
+        )
+
+    @staticmethod
+    def row_to_application(row: dict) -> Application:
+        return Application(
+            row['id'],
+            row['name'],
+            row['package_name'],
+            row['type'],
+            row['description'],
+            row['release_date'],
+            row['early_access'],
+            row['latest_version'],
+            row['supported_platforms'],
+            row['genres'],
+            row['tags'],
+            row['base_price'],
+            row['owners']
         )
 
     @staticmethod
