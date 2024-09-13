@@ -1,4 +1,5 @@
 import smtplib
+from loguru import logger
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
@@ -15,6 +16,8 @@ class EmailManager:
         message['From'] = self.display_name
         message['To'] = ', '.join(recipients)
 
+        logger.info(f'Sending text email to: {recipients} - subject: {subject}, body: {body}')
+
         with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
             server.login(self.email_address, self.password)
             server.sendmail(self.email_address, recipients, message.as_string())
@@ -25,6 +28,9 @@ class EmailManager:
         message['Subject'] = subject
         message['From'] = self.display_name
         message['To'] = ', '.join(recipients)
+
+        logger.info(f'Sending regular email to: {recipients} - subject: {subject}, text body: {text_body}, '
+                    f'html body: {html_body}')
 
         # Add the text and HTML bodies.
         message.attach(MIMEText(text_body, 'plain'))

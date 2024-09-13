@@ -2,6 +2,7 @@ import json
 import sqlite3
 
 from datetime import date
+from loguru import logger
 
 from email_manager import EmailManager
 from email_utils import EmailUtils
@@ -35,11 +36,14 @@ class Database:
     def initialize(self):
         if not self.initialized:
             # Connect to the SQLite database.
+            logger.info('Connecting to the SQLite database.')
             self.connection = sqlite3.connect(self.path, check_same_thread=False)
             self.cursor = self.connection.cursor()
 
             # Set the cursor's row factory so queries return dicts instead of arrays.
             self.cursor.row_factory = Utils.dict_factory
+
+            logger.info('Creating nonexistent database tables.')
 
             # Ensure that the necessary tables have been created.
             self.cursor.execute('''
@@ -270,6 +274,7 @@ class Database:
 
         # Generate a new verification code.
         verification_code: int = Utils.generate_verification_code()
+        logger.info(f'Generated verification code for {email_address}: {verification_code}')
 
         # Insert the new verification code into the database.
         self.cursor.execute('INSERT INTO `email_codes` (`email_address`, `code`) VALUES (?, ?)', (email_address, verification_code))
@@ -335,6 +340,8 @@ class Database:
         # Commit the changes.
         self.connection.commit()
 
+        logger.info(f'Created user: {username} - name: {name}, email address: {email_address}')
+
         return True, {'details': 'User created successfully.'}
 
     def get_user(self, identifier, identifier_type: str = 'id') -> User | None:
@@ -376,6 +383,10 @@ class Database:
         # Commit the changes.
         self.connection.commit()
 
+        logger.info(f'Created application: {name} - type: {type_}, description: {description}, '
+                    f'early access: {early_access}, supported platforms: {supported_platforms_string}, '
+                    f'genres: {genres_string}, tags: {tags_string}, owners: {owners_string}')
+
         return True, {'details': 'Application created successfully.', 'application_id': self.cursor.lastrowid}
 
     def get_application(self, identifier, identifier_type: str = 'id') -> Application | None:
@@ -412,6 +423,8 @@ class Database:
         # Commit the changes.
         self.connection.commit()
 
+        logger.info(f'Updated application ({application_id}) property: {property_} - value: {value}')
+
     def create_application_version(self, application_id: int, name: str, platform: str, release_date: date,
                                    filename: str, executable: str) -> tuple[bool, dict]:
         # Make sure the version does not already exist.
@@ -428,6 +441,10 @@ class Database:
 
         # Commit the changes.
         self.connection.commit()
+
+        logger.info(f'Creating application version. Application id: {application_id}, version name: {name}, '
+                    f'platform: {platform}, release_date: {release_date}, filename: {filename}, '
+                    f'executable: {executable}')
 
         return True, {'details': 'Application version created successfully.'}
 
@@ -500,6 +517,9 @@ class Database:
         # Commit the changes.
         self.connection.commit()
 
+        logger.info(f'Created sale for application: {application_id} - title: {title}, description: {description}, '
+                    f'price: {price_string}, start date: {start_date}, end date: {end_date}')
+
         return True, {'details': 'Sale created successfully.'}
 
     def get_active_sale(self, application_id: int, active_date: date) -> Sale | None:
@@ -547,6 +567,9 @@ class Database:
         # Commit the changes.
         self.connection.commit()
 
+        logger.info(f'User: {user_id} purchased {application_id} ({iap_id}) - type: {type_}, source: {source}, '
+                    f'price: {price}, key: {key}, date: {date_}')
+
         return self.cursor.lastrowid
 
     def get_purchase(self, id_: int) -> Purchase | None:
@@ -569,6 +592,8 @@ class Database:
         # Commit the changes.
         self.connection.commit()
 
+        logger.info(f'User: {user_id} deposited {amount} - source: {source}, date: {date_}')
+
         return self.cursor.lastrowid
 
     def get_deposit(self, id_: int) -> Deposit | None:
@@ -590,6 +615,9 @@ class Database:
 
         # Commit the changes.
         self.connection.commit()
+
+        logger.info(f'Transaction created: user id: {user_id}, transaction id: {transaction_id}, type: {type_}, '
+                    f'date: {date_}')
 
         return self.cursor.lastrowid
 
@@ -618,6 +646,9 @@ class Database:
         # Commit the changes.
         self.connection.commit()
 
+        logger.info(f'Created application key for application: {application_id}, key: {key}, type: {type_}, '
+                    f'redeemed: {redeemed}')
+
         return True, {'details': 'Application key created successfully.', 'key': key, 'id': self.cursor.lastrowid}
 
     def get_application_key(self, identifier, identifier_type: str = 'key') -> ApplicationKey | None:
@@ -640,6 +671,8 @@ class Database:
 
         # Commit the changes.
         self.connection.commit()
+
+        logger.warning(f'Deleted application key: {id_}')
 
     def get_user_application_keys(self, user_id: int) -> list[ApplicationKey]:
         application_keys: list[ApplicationKey] = []
@@ -684,6 +717,8 @@ class Database:
         # Commit the changes.
         self.connection.commit()
 
+        logger.info(f'User {from_user_id} sent a friend request to user: {user_id}')
+
         return True, {'details': 'Friend request created successfully.', 'id': self.cursor.lastrowid}
 
     def get_friend_request_by_id(self, id_: int) -> FriendRequest | None:
@@ -711,6 +746,8 @@ class Database:
 
         # Commit the changes.
         self.connection.commit()
+
+        logger.warning(f'Deleted friends request: {id_}')
 
     def accept_friend_request(self, id_: int) -> tuple[bool, dict]:
         # Fetch the friend request.
@@ -748,6 +785,8 @@ class Database:
 
         # Delete the friend request.
         self.delete_friend_request(id_)
+
+        logger.info(f'User {user_id} accepted a friend request from user: {from_user_id} - they are now friends.')
 
         return True, {'details': 'Friend request accepted successfully.'}
 
@@ -804,6 +843,8 @@ class Database:
         # Commit the changes.
         self.connection.commit()
 
+        logger.warning(f'User: {user_id} removed user: {other_user_id} as a friend. They are no long friends.')
+
         return True, {'details': 'Friend removed successfully.'}
 
     def create_session(self, user_id: int, hostname: str, mac_address: str, platform: str, start_date: date,
@@ -819,6 +860,9 @@ class Database:
 
         # Commit the changes.
         self.connection.commit()
+
+        logger.info(f'Created session {session_id} for user: {user_id} - hostname: {hostname}, '
+                    f'mac_address: {mac_address}, platform: {platform}')
 
         return True, {'details': 'Session created successfully.', 'session_id': session_id}
 
@@ -843,12 +887,16 @@ class Database:
         # Commit the changes.
         self.connection.commit()
 
+        logger.warning(f'Deleted session: {id_}')
+
     def update_session_last_activity(self, id_: int, date_: date):
         # Update the session.
         self.cursor.execute('UPDATE `sessions` SET `last_activity` = ? WHERE `id` = ?', (date_, id_))
 
         # Commit the changes.
         self.connection.commit()
+
+        logger.info(f'Updated session: {id_} - last activity: {date_}')
 
     def get_sessions_for(self, user_id: int) -> list[Session]:
         sessions: list[Session] = []
@@ -872,6 +920,8 @@ class Database:
 
         # Commit the changes.
         self.connection.commit()
+
+        logger.info(f'User: {user_id} invited user: {from_user_id} - application: {application_id}, details: {details}')
 
     def get_invite_by_id(self, id_: int) -> Invite | None:
         # Attempt to get the requested invite.
@@ -902,6 +952,8 @@ class Database:
         # Commit the changes.
         self.connection.commit()
 
+        logger.warning(f'Deleted invite: {id_}')
+
     def create_application_session(self, user_id: int, application_id: int, date_: date,
                                    length: int):
         # Create the session.
@@ -912,6 +964,8 @@ class Database:
 
         # Commit the changes.
         self.connection.commit()
+
+        logger.info(f'{user_id} had a {length} session in {application_id} - date: {date_}')
 
     def get_application_session(self, id_: int) -> ApplicationSession | None:
         # Attempt to get the application session.
@@ -965,6 +1019,8 @@ class Database:
         # Commit the changes.
         self.connection.commit()
 
+        logger.info(f'Created photo entry: {filename} - subfolder: {subfolder}')
+
         return True, {'details': 'Photo created successfully.'}
 
     def get_photo_by_id(self, id_: int) -> Photo | None:
@@ -997,6 +1053,9 @@ class Database:
 
         # Commit the changes.
         self.connection.commit()
+
+        logger.info(f'Created iap: {title} - description: {description} for application: {application_id}, '
+                    f'price: {price}, data: {data}')
 
         return True, {'details': 'IAP created successfully.', 'id': self.cursor.lastrowid}
 
@@ -1034,6 +1093,8 @@ class Database:
         # Commit the changes.
         self.connection.commit()
 
+        logger.info(f'Created cloud data for user: {user_id} - application: {application_id}, data: {data}')
+
     def get_cloud_data(self, user_id: int, application_id: int) -> CloudData | None:
         self.cursor.execute('SELECT * FROM `cloud_data` WHERE `user_id` = ? AND `application_id` = ?', (user_id, application_id))
         row = self.cursor.fetchone()
@@ -1050,9 +1111,13 @@ class Database:
         # Commit the changes.
         self.connection.commit()
 
+        logger.info(f'Deleted cloud data for user: {user_id} - application: {application_id}')
+
     def delete_application_cloud_data(self, application_id: int):
         # Delete all the cloud data for the specified application.
         self.cursor.execute('DELETE FROM `cloud_data` WHERE `application_id` = ?', (application_id,))
 
         # Commit the changes.
         self.connection.commit()
+
+        logger.info(f'Deleted cloud data for application: {application_id}')

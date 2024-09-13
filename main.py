@@ -1,8 +1,10 @@
 import os
+import sys
 
 from dotenv import load_dotenv
 from datetime import datetime
 from datetime import date
+from loguru import logger
 
 # Flask-related imports.
 from flask import Flask, request, send_file
@@ -479,20 +481,30 @@ class GetVersions(APIResource):
 def main():
     global email_manager, database, database_utils, file_manager, app, api
 
+    # Initialize the logger.
+    logger.remove()
+    logger.add('logs/frogworks_{time}.log', rotation='1 week', retention=5, level='INFO')
+    logger.add(sys.stdout, level='INFO')
+
     # Load the .env environment variables.
+    logger.info('Loading .env file.')
     load_dotenv()
 
     # Initialize the email manager.
+    logger.info('Initializing email manager.')
     email_manager = EmailManager(os.getenv('EMAIL_ADDRESS'), os.getenv('APP_PASSWORD'), os.getenv('DISPLAY_NAME'))
 
     # Initialize the database.
+    logger.info('Initializing database.')
     database = Database(email_manager)
     database.initialize()
 
     # Initialize the database utils.
+    logger.info('Initializing database utils.')
     database_utils = DatabaseUtils(database)
 
     # Initialize the file manager.
+    logger.info('Initializing file manager.')
     file_manager = FileManager(database, BASE_DIRECTORY, PHOTOS_DIRECTORY, APPLICATIONS_DIRECTORY)
     file_manager.initialize()
 
@@ -500,10 +512,12 @@ def main():
     server_port: int = int(os.getenv('SERVER_PORT'))
 
     # Initialize the HTTP server.
+    logger.info('Initializing Flask server.')
     app = Flask(__name__)
     api = Api(app)
 
     # Add the routes.
+    logger.info('Adding API routes.')
     api.add_resource(Ping, '/api/ping')
     api.add_resource(RequestEmailVerification, '/api/email-verification/request')
     api.add_resource(CheckEmailVerification, '/api/email-verification/check')
@@ -520,6 +534,7 @@ def main():
     api.add_resource(CreateVersion, '/api/version/create')
 
     # Run the HTTP server.
+    logger.info('Starting HTTP server.')
     app.run(
         host='0.0.0.0',
         port=server_port,
