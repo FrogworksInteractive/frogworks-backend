@@ -5,14 +5,16 @@ from datetime import datetime
 from datetime import date
 
 # Flask-related imports.
-from flask import Flask, request
+from flask import Flask, request, send_file
 from flask_restful import Api
 
 # Local imports.
 from database import Database
+from database_utils import DatabaseUtils
 from email_manager import EmailManager
 from api_resource import APIResource
 from file_manager import FileManager
+from structures.application_version import ApplicationVersion
 from structures.user import User
 from utils import Utils
 
@@ -26,6 +28,7 @@ APPLICATIONS_DIRECTORY: str = 'applications'
 # Variables.
 email_manager: EmailManager | None = None
 database: Database | None = None
+database_utils: DatabaseUtils | None = None
 file_manager: FileManager | None = None
 app = None
 api = None
@@ -333,6 +336,67 @@ class UpdateApplicationVersion(APIResource):
         return {}
 
 
+class GetApplicationVersions(APIResource):
+    required_parameters = ['application_id']
+
+    def get(self):
+        missing, parameters = self.missing_parameters()
+
+        if missing:
+            return {'missing_parameters': parameters}, 400
+
+        success, response, response_code, session, user = self.verify_session(database)
+
+        if not success:
+            return response, response_code
+
+        # Get the parameters.
+        application_id: int = Utils.safe_int_cast(request.form.get('application_id'))
+
+        # Verify that the user owns the specified application.
+        if not database_utils.user_owns(user.id, application_id):
+            return {'details': 'You do not own this application.'}
+
+        versions: list[ApplicationVersion]
+
+        if 'platform' in request.form:
+            versions = database.get_application_versions_for_platform(application_id, str(request.form['platform']))
+        else:
+            versions = database.get_application_versions(application_id)
+
+        return {'versions': Utils.serialize(versions)}, 200
+
+
+class DownloadApplicationVersion(APIResource):
+    required_parameters = ['version_id']
+
+    def get(self):
+        missing, parameters = self.missing_parameters()
+
+        if missing:
+            return {'missing_parameters': parameters}, 400
+
+        success, response, response_code, session, user = self.verify_session(database)
+
+        if not success:
+            return response, response_code
+
+        # Get the parameters.
+        version_id: int = Utils.safe_int_cast(request.form.get('version_id'))
+
+        # Get the version.
+        version = database.get_application_version_by_id(version_id)
+
+        if not version:
+            return {'details': 'The specified version does not exist.'}, 400
+
+        # Verify that the user owns the specified application.
+        if not database_utils.user_owns(user.id, version.application_id):
+            return {'details': 'You do not own this application.'}
+
+        return send_file(file_manager.get_version_filepath(version_id))
+
+
 class CreateVersion(APIResource):
     required_parameters = ['application_id', 'name', 'platform', 'release_date', 'filename', 'executable']
     required_files = ['file']
@@ -413,7 +477,7 @@ class GetVersions(APIResource):
 
 # Main method.
 def main():
-    global email_manager, database, file_manager, app, api
+    global email_manager, database, database_utils, file_manager, app, api
 
     # Load the .env environment variables.
     load_dotenv()
@@ -424,6 +488,9 @@ def main():
     # Initialize the database.
     database = Database(email_manager)
     database.initialize()
+
+    # Initialize the database utils.
+    database_utils = DatabaseUtils(database)
 
     # Initialize the file manager.
     file_manager = FileManager(database, BASE_DIRECTORY, PHOTOS_DIRECTORY, APPLICATIONS_DIRECTORY)
@@ -447,6 +514,8 @@ def main():
     api.add_resource(DeleteSession, '/api/session/delete')
     api.add_resource(CreateApplication, '/api/application/create')
     api.add_resource(GetApplication, '/api/application/get')
+    api.add_resource(GetApplicationVersions, '/api/application/versions')
+    api.add_resource(DownloadApplicationVersion, '/api/application/versions/download')
     api.add_resource(UpdateApplicationVersion, '/api/application/update-version')
     api.add_resource(CreateVersion, '/api/version/create')
 
