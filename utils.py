@@ -105,7 +105,7 @@ class Utils:
             return default
 
     @staticmethod
-    def serialize(item, private: bool):
+    def serialize(item, private: bool = False):
         if isinstance(item, Structure):
             return item.into_dict(private)
         elif isinstance(item, bool):
