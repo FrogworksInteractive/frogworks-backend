@@ -15,5 +15,5 @@ class Session(Structure):
         self.hostname: str = hostname
         self.mac_address: str = mac_address
         self.platform: str = platform
-        self.start_date: date = datetime.strptime(start_date, '%Y-%m-%d')
-        self.last_activity: date = datetime.strptime(last_activity, '%Y-%m-%d')
+        self.start_date: date = datetime.strptime(start_date, '%Y-%m-%d').date()
+        self.last_activity: date = datetime.strptime(last_activity, '%Y-%m-%d').date()

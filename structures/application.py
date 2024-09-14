@@ -24,5 +24,5 @@ class Application(Structure):
         self.supported_platforms: list = supported_platforms.split(',')
         self.genres: list = genres.split(',')
         self.tags: list = tags.split(',')
-        self.base_price: float = float(base_price)
+        self.base_price: float = Utils.safe_float_cast(base_price)
         self.owners: list = [int(owner) for owner in owners.split(',')]

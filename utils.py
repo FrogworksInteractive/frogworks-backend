@@ -4,6 +4,7 @@ import bcrypt
 
 from datetime import date
 
+from structures.iap_record import IAPRecord
 from structures.application import Application
 from structures.application_key import ApplicationKey
 from structures.application_session import ApplicationSession
@@ -109,8 +110,6 @@ class Utils:
     def serialize(item, private: bool = False):
         if isinstance(item, Structure):
             return item.into_dict(private)
-        elif isinstance(item, bool):
-            return 'true' if item else 'false'
         elif isinstance(item, dict):
             # Copy the dictionary to avoid issues because Python is special.
             item_copy = item.copy()
@@ -128,7 +127,7 @@ class Utils:
                 serialized_item.append(Utils.serialize(i, private))
 
             return serialized_item
-        elif type(item) in [int, float]:
+        elif type(item) in [int, float, bool]:
             return item
 
         # As a catch-all, turn the item into a string.
@@ -321,4 +320,15 @@ class Utils:
             row['application_id'],
             row['data'],
             row['date']
+        )
+
+    @staticmethod
+    def row_to_iap_record(row: dict) -> IAPRecord:
+        return IAPRecord(
+            row['id'],
+            row['iap_id'],
+            row['user_id'],
+            row['application_id'],
+            row['date'],
+            row['acknowledged']
         )

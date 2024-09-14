@@ -11,4 +11,4 @@ class Photo(Structure):
         self.id: int = id_
         self.filename: str = filename
         self.subfolder: str = subfolder
-        self.created_at: date = datetime.strptime(created_at, '%Y-%m-%d')
+        self.created_at: date = datetime.strptime(created_at, '%Y-%m-%d').date()

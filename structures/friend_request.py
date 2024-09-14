@@ -11,4 +11,4 @@ class FriendRequest(Structure):
         self.id: int = id_
         self.user_id: int = user_id
         self.from_user_id: int = from_user_id
-        self.date: date = datetime.strptime(date_, '%Y-%m-%d')
+        self.date: date = datetime.strptime(date_, '%Y-%m-%d').date()

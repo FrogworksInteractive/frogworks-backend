@@ -6,6 +6,7 @@ from loguru import logger
 
 from email_manager import EmailManager
 from email_utils import EmailUtils
+from structures.iap_record import IAPRecord
 from structures.application import Application
 from structures.application_key import ApplicationKey
 from structures.application_session import ApplicationSession
@@ -241,6 +242,17 @@ class Database:
             )
             ''')
 
+            self.cursor.execute('''
+            CREATE TABLE IF NOT EXISTS `iap_records` (
+                `id` INTEGER PRIMARY KEY AUTOINCREMENT,
+                `iap_id` INTEGER NOT NULL,
+                `user_id` INTEGER NOT NULL,
+                `application_id` INTEGER NOT NULL,
+                `date` DATE NOT NULL,
+                `acknowledged` BOOLEAN NOT NULL
+            )
+            ''')
+
         self.initialized = True
 
     def username_taken(self, username: str) -> bool:
@@ -306,7 +318,7 @@ class Database:
         return not row is None
 
     def create_user(self, username: str, name: str, email_address: str, password: str,
-                    email_verification_code: int, administrator: bool = False) -> tuple[bool, dict]:
+                    email_verification_code: int, **kwargs) -> tuple[bool, dict]:
         # Perform the pre-registration checks.
         if self.username_taken(username):
             return False, {'details': 'This username is already taken.'}
@@ -331,11 +343,16 @@ class Database:
         profile_photo_id: int = 1
         activity: dict = Utils.generate_activity_dict(-1, '', {})
 
+        # Handle the kwargs.
+        developer: bool = kwargs.get('developer', False)
+        administrator: bool = kwargs.get('administrator', False)
+        verified: bool = kwargs.get('verified', False)
+
         # Create the user's account.
         self.cursor.execute('''
         INSERT INTO `users` (`identifier`, `username`, `name`, `email_address`, `password`, `joined`, `balance`, `profile_photo_id`, `activity`, `developer`, `administrator`, `verified`)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (identifier, username, name, email_address, hashed_password, current_date, balance, profile_photo_id, json.dumps(activity), False, administrator, False))
+        ''', (identifier, username, name, email_address, hashed_password, current_date, balance, profile_photo_id, json.dumps(activity), developer, administrator, verified))
 
         # Commit the changes.
         self.connection.commit()
@@ -357,6 +374,13 @@ class Database:
             return None
 
         return Utils.row_to_user(row)
+
+    def update_user_property(self, user_id: int, property_: str, value):
+        # Attempt to update the user.
+        self.cursor.execute(f'UPDATE `users` SET `{property_}` = ? WHERE `id` = ?', (value, user_id))
+
+        # Commit the changes.
+        self.connection.commit()
 
     def create_application(self, name: str, package_name: str, type_: str, description: str, release_date: date,
                            early_access: bool, latest_version: str, supported_platforms: list, genres: list, tags: list,
@@ -645,7 +669,40 @@ class Database:
 
         return Utils.row_to_transaction(row)
 
-    def create_application_key(self, application_id: int, key: str, type_: str, redeemed: bool) -> tuple[bool, dict]:
+    def get_transaction_for(self, transaction_id: int) -> Transaction | None:
+        # Attempt to get a transaction for a specified transaction id (useful for reverse lookup on deposits and
+        # purchases).
+        self.cursor.execute('SELECT * FROM `transactions` WHERE `transaction_id` = ?`', (transaction_id,))
+        row = self.cursor.fetchone()
+
+        if row is None:
+            return None
+
+        return Utils.row_to_transaction(row)
+
+    def get_user_transactions(self, user_id: int) -> list[Transaction]:
+        # Fetch all transactions of a specific user.
+        self.cursor.execute('SELECT * FROM `transactions` WHERE `user_id` = ?', (user_id,))
+
+        transactions: list[Transaction] = []
+
+        for row in self.cursor.fetchall():
+            transactions.append(Utils.row_to_transaction(row))
+
+        return transactions
+
+    def get_user_transactions_in(self, user_id: int, application_id: int) -> list[Transaction]:
+        # Fetch all transactions of a specific user in a specific application.
+        self.cursor.execute('SELECT * FROM `transactions` WHERE `user_id` = ? AND `application_id` = ?', (user_id, application_id))
+
+        transactions: list[Transaction] = []
+
+        for row in self.cursor.fetchall():
+            transactions.append(Utils.row_to_transaction(row))
+
+        return transactions
+
+    def create_application_key(self, application_id: int, key: str, type_: str, redeemed: bool, user_id: int) -> tuple[bool, dict]:
         # Make sure the application key does not already exist.
         existing_key = self.get_application_key(key)
 
@@ -654,9 +711,9 @@ class Database:
 
         # The key does not exist; create it.
         self.cursor.execute('''
-        INSERT INTO `application_keys` (`application_id`, `key`, `type`, `redeemed`)
-        VALUES (?, ?, ?, ?)
-        ''', (application_id, key, type_, redeemed))
+        INSERT INTO `application_keys` (`application_id`, `key`, `type`, `redeemed`, `user_id`)
+        VALUES (?, ?, ?, ?, ?)
+        ''', (application_id, key, type_, redeemed, user_id))
 
         # Commit the changes.
         self.connection.commit()
@@ -717,6 +774,10 @@ class Database:
 
         if existing_request:
             return False, {'details': 'Friend request already exists.'}
+
+        # Ensure that the user is not sending a friend request to their self somehow.
+        if user_id == from_user_id:
+            return False, {'details': 'You cannot send a friend request to yourself.'}
 
         opposite_request = self.get_friend_request_by_users(from_user_id, user_id)
 
@@ -831,7 +892,7 @@ class Database:
 
     def get_friend_by_users(self, user_id: int, from_user_id: int) -> Friend | None:
         # Attempt to get a friend entry based on two user ids. (Useful for verifying that two users are friends.)
-        self.cursor.execute('SELECT * FROM `friends` WHERE `user_id` = ? AND `from_user_id` = ?', (user_id, from_user_id))
+        self.cursor.execute('SELECT * FROM `friends` WHERE `user_id` = ? AND `other_user_id` = ?', (user_id, from_user_id))
         row = self.cursor.fetchone()
 
         if row is None:
@@ -1136,3 +1197,78 @@ class Database:
         self.connection.commit()
 
         logger.info(f'Deleted cloud data for application: {application_id}')
+
+    def create_iap_record(self, iap_id: int, user_id: int, date_: date,
+                          acknowledged: bool = False) -> tuple[bool, dict]:
+        # Ensure that the iap exists.
+        iap = self.get_iap(iap_id)
+
+        if iap is None:
+            return False, {'details': 'IAP not found.'}
+
+        # Ensure that the user exists.
+        user = self.get_user(user_id)
+
+        if user is None:
+            return False, {'details': 'User not found.'}
+
+        # Everything is okay; create the iap record.
+        self.cursor.execute('''
+        INSERT INTO `iap_records` (`iap_id`, `user_id`, `date`, `acknowledged`)
+        VALUES (?, ?, ?, ?)
+        ''', (iap_id, user_id, date_, acknowledged))
+
+        return True, {'details': 'IAP record created successfully.', 'id': self.cursor.lastrowid}
+
+    def get_iap_records(self, application_id: int, user_id: int, only_unacknowledged: bool = False) -> list[IAPRecord]:
+        # Fetch the iap records for a specific user, in a specific application.
+        # Ensure that the application exists.
+        application = self.get_application(application_id)
+
+        if application is None:
+            return []
+
+        # Ensure that the user exists.
+        user = self.get_user(user_id)
+
+        if user is None:
+            return []
+
+        records: list[IAPRecord] = []
+
+        # Get the records.
+        if only_unacknowledged:
+            self.cursor.execute('SELECT * FROM `iap_records` WHERE `application_id` = ? AND `user_id` = ? and `acknowledged` = ?', (application_id, user_id, False))
+        else:
+            self.cursor.execute('SELECT * FROM `iap_records` WHERE `application_id` = ? AND `user_id` = ?', (application_id, user_id))
+
+        # Loop through all the records, adding them to the list.
+        for row in self.cursor.fetchall():
+            records.append(Utils.row_to_iap_record(row))
+
+        return records
+
+    def get_iap_record(self, id_: int) -> IAPRecord | None:
+        # Attempt to get the iap record.
+        self.cursor.execute('SELECT * FROM `iap_records` WHERE `id` = ?', (id_,))
+        row = self.cursor.fetchone()
+
+        if row is None:
+            return None
+
+        return Utils.row_to_iap_record(row)
+
+    def acknowledge_iap_record(self, id_: int) -> tuple[bool, dict]:
+        # Ensure that the iap record exists.
+        iap_record = self.get_iap_record(id_)
+
+        if iap_record is None:
+            return False, {'details': 'IAP record not found.'}
+
+        if iap_record.acknowledged:
+            return False, {'details': 'IAP record already acknowledged.'}
+
+        # Update the record.
+        self.cursor.execute('UPDATE `iap_records` SET `acknowledged = ? WHERE `id` = ?', (True, id_))
+
+        return True, {'details': 'IAP record acknowledged successfully.'}

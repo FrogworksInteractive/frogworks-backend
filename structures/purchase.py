@@ -19,4 +19,4 @@ class Purchase(Structure):
         self.source: str = source
         self.price: float = Utils.safe_float_cast(price)
         self.key: str = key
-        self.date: date = datetime.strptime(date_, '%Y-%m-%d')
+        self.date: date = datetime.strptime(date_, '%Y-%m-%d').date()

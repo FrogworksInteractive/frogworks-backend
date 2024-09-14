@@ -16,8 +16,11 @@ from database_utils import DatabaseUtils
 from email_manager import EmailManager
 from api_resource import APIResource
 from file_manager import FileManager
+from structures.iap_record import IAPRecord
+from structures.application_key import ApplicationKey
 from structures.application_version import ApplicationVersion
 from structures.sale import Sale
+from structures.transaction import Transaction
 from structures.user import User
 from utils import Utils
 
@@ -363,7 +366,7 @@ class GetApplicationVersions(APIResource):
         versions: list[ApplicationVersion]
 
         if 'platform' in request.form:
-            versions = database.get_application_versions_for_platform(application_id, str(request.form['platform']))
+            versions = database.get_application_versions_for_platform(application_id, str(request.form.get('platform')))
         else:
             versions = database.get_application_versions(application_id)
 
@@ -643,6 +646,473 @@ class DeleteSale(APIResource):
         return response, 400
 
 
+class GetTransactions(APIResource):
+    required_parameters = ['user_id']
+
+    def get(self):
+        missing, parameters = self.missing_parameters()
+
+        if missing:
+            return {'missing_parameters': parameters}, 400
+
+        success, response, response_code, session, user = self.verify_session(database)
+
+        if not success:
+            return response, response_code
+
+        # Get the parameters.
+        user_id: int = Utils.safe_int_cast(request.form.get('user_id'))
+
+        # Ensure that the user exists.
+        target_user = database.get_user(user_id)
+
+        if not target_user:
+            return {'details': 'The specified user does not exist.'}, 400
+
+        # Ensure that the user requesting to fetch the transactions has the proper authority to do so.
+        if not user.is_or_admin(user_id):
+            return {'details': 'You do not have the authority to access this user\'s transaction records.'}, 403
+
+        transactions: list[Transaction] = []
+
+        # Get the user's transactions.
+        if 'application_id' in request.form:
+            transactions = database.get_user_transactions_in(user_id,
+                                                             Utils.safe_int_cast(request.form.get('application_id')))
+        else:
+            transactions = database.get_user_transactions(user_id)
+
+        return {'transactions': Utils.serialize(transactions, True)}, 200
+
+
+class GetTransaction(APIResource):
+    required_parameters = ['transaction_id']
+
+    def get(self):
+        missing, parameters = self.missing_parameters()
+
+        if missing:
+            return {'missing_parameters': parameters}, 400
+
+        success, response, response_code, session, user = self.verify_session(database)
+
+        if not success:
+            return response, response_code
+
+        # Get the parameters.
+        transaction_id: int = Utils.safe_int_cast(request.form.get('transaction_id'))
+
+        # Ensure that the transaction exists.
+        transaction = database.get_transaction(transaction_id)
+
+        if not transaction:
+            return {'details': 'The specified transaction does not exist.'}, 400
+
+        # Ensure that the user requesting the transaction has the proper authority to view it.
+        if not user.is_or_admin(transaction.user_id):
+            return {'details': 'You do not have the authority to access this user\'s transaction(s).'}, 403
+
+        return {'transaction': Utils.serialize(transaction, True)}, 200
+
+
+class GetPurchase(APIResource):
+    required_parameters = ['purchase_id']
+
+    def get(self):
+        missing, parameters = self.missing_parameters()
+
+        if missing:
+            return {'missing_parameters': parameters}, 400
+
+        success, response, response_code, session, user = self.verify_session(database)
+
+        if not success:
+            return response, response_code
+
+        # Get the parameters
+        purchase_id: int = Utils.safe_int_cast(request.form.get('purchase_id'))
+
+        # Ensure that the purchase exists.
+        purchase = database.get_purchase(purchase_id)
+
+        if not purchase:
+            return {'details': 'The specified purchase does not exist.'}, 400
+
+        # Ensure that the user has the proper authority to access this purchase.
+        if not user.is_or_admin(database_utils.get_purchase_source(purchase_id)):
+            return {'details': 'You do not have the authority to access this user\'s purchase(s).'}, 403
+
+        return {'purchase': Utils.serialize(purchase, True)}, 200
+
+
+class GetDeposit(APIResource):
+    required_parameters = ['deposit_id']
+
+    def get(self):
+        missing, parameters = self.missing_parameters()
+
+        if missing:
+            return {'missing_parameters': parameters}, 400
+
+        success, response, response_code, session, user = self.verify_session(database)
+
+        if not success:
+            return response, response_code
+
+        # Get the parameters.
+        deposit_id: int = Utils.safe_int_cast(request.form.get('deposit_id'))
+
+        # Ensure that the deposit exists.
+        deposit = database.get_deposit(deposit_id)
+
+        if not deposit:
+            return {'details': 'The specified deposit does not exist.'}, 400
+
+        # Ensure that the user has the authority to view the requested deposit.
+        if not user.is_or_admin(deposit.user_id):
+            return {'details': 'You do not have the authority to access this user\'s deposit(s).'}, 403
+
+        return {'deposit': Utils.serialize(deposit, True)}, 200
+
+
+class GetApplicationKey(APIResource):
+    required_parameters = ['key']
+
+    def get(self):
+        missing, parameters = self.missing_parameters()
+
+        if missing:
+            return {'missing_parameters': parameters}, 400
+
+        success, response, response_code, session, user = self.verify_session(database)
+
+        if not success:
+            return response, response_code
+
+        # Get the parameters.
+        key = request.form.get('key')
+
+        # Attempt to get the application key.
+        application_key = database.get_application_key(key)
+
+        if not application_key:
+            return {'details': 'The specified application key does not exist.'}, 400
+
+        # Ensure the user has the authority to access this application key.
+        if not user.is_or_admin(application_key.user_id):
+            return {'details': 'You do not have the authority to access this user\'s application key(s).'}, 403
+
+        return {'application_key': Utils.serialize(application_key, True)}, 200
+
+
+class GetApplicationKeys(APIResource):
+    required_parameters = ['user_id']
+
+    def get(self):
+        missing, parameters = self.missing_parameters()
+
+        if missing:
+            return {'missing_parameters': parameters}, 400
+
+        success, response, response_code, session, user = self.verify_session(database)
+
+        if not success:
+            return response, response_code
+
+        # Get the parameters.
+        user_id: int = Utils.safe_int_cast(request.form.get('user_id'))
+
+        # Ensure that the user exists.
+        target_user = database.get_user(user_id)
+
+        if not target_user:
+            return {'details': 'The specified user does not exist.'}, 400
+
+        # Ensure that the user has authority to access the authentication keys.
+        if not user.is_or_admin(user_id):
+            return {'details': 'You do not have the authority to access this user\'s application key(s).'}, 403
+
+        # Get the authentication keys.
+        application_keys: list[ApplicationKey] = database.get_user_application_keys(user_id)
+
+        return {'application_keys': Utils.serialize(application_keys, True)}, 200
+
+
+class PurchaseApplication(APIResource):
+    required_parameters = ['application_id']
+
+    def post(self):
+        missing, parameters = self.missing_parameters()
+
+        if missing:
+            return {'missing_parameters': parameters}, 400
+
+        success, response, response_code, session, user = self.verify_session(database)
+
+        if not success:
+            return response, response_code
+
+        # Get the parameters.
+        application_id: int = Utils.safe_int_cast(request.form.get('application_id'))
+
+        # Ensure that the application exists.
+        application = database.get_application(application_id)
+
+        if not application:
+            return {'details': 'The specified application does not exist.'}, 400
+
+        # Get the optional parameters.
+        for_user_id: int = Utils.safe_int_cast(request.form.get('for_user_id')) \
+            if 'for_user_id' in request.form \
+            else user.id
+
+        # Attempt to purchase the application.
+        success, response = database_utils.purchase(user.id, application_id, for_user_id)
+
+        if not success:
+            return response, 400
+
+        return {'details': 'Successfully purchased application.', 'transaction_id': response['transaction_id']}, 200
+
+
+class PurchaseIAP(APIResource):
+    required_parameters = ['iap_id']
+
+    def post(self):
+        missing, parameters = self.missing_parameters()
+
+        if missing:
+            return {'missing_parameters': parameters}, 400
+
+        success, response, response_code, session, user = self.verify_session(database)
+
+        if not success:
+            return response, response_code
+
+        # Get the parameters.
+        iap_id: int = Utils.safe_int_cast(request.form.get('iap_id'))
+
+        # Ensure that the iap exists.
+        iap = database.get_iap(iap_id)
+
+        if not iap:
+            return {'details': 'The specified iap does not exist.'}, 400
+
+        # Get the optional parameters.
+        for_user_id: int = Utils.safe_int_cast(request.form.get('for_user_id')) \
+            if 'for_user_id' in request.form \
+            else user.id
+
+        success, response = database_utils.purchase(user.id, iap_id, for_user_id, iap_id)
+
+        if not success:
+            return response, 400
+
+        return {'details': 'Successfully purchased iap.', 'transaction_id': response['transaction_id']}, 200
+
+
+class GetIAPRecords(APIResource):
+    required_parameters = ['user_id', 'application_id']
+
+    def get(self):
+        missing, parameters = self.missing_parameters()
+
+        if missing:
+            return {'missing_parameters': parameters}, 400
+
+        success, response, response_code, session, user = self.verify_session(database)
+
+        if not success:
+            return response, response_code
+
+        # Get the parameters.
+        user_id: int = Utils.safe_int_cast(request.form.get('user_id'))
+        application_id: int = Utils.safe_int_cast(request.form.get('application_id'))
+
+        # Ensure that the user exists.
+        target_user = database.get_user(user_id)
+
+        if not target_user:
+            return {'details': 'The specified user does not exist.'}, 400
+
+        # Ensure that the user has the authority to view this user's iap records.
+        if not user.is_or_admin(target_user.id):
+            return {'details': 'You do not have the authority to access this user\'s iap records(s).'}, 403
+
+        # Get the iap records.
+        records: list[IAPRecord] = database.get_iap_records(user_id, application_id)
+
+        return {'iap_records': Utils.serialize(records, True)}, 200
+
+
+class GetSession(APIResource):
+    required_parameters = ['session_id']
+
+    def get(self):
+        missing, parameters = self.missing_parameters()
+
+        if missing:
+            return {'missing_parameters': parameters}, 400
+
+        success, response, response_code, session, user = self.verify_session(database)
+
+        if not success:
+            return response, response_code
+
+        # Get the parameters.
+        session_id: str = request.form.get('session_id')
+
+        # Ensure that the session exists.
+        session = database.get_session(session_id)
+
+        if not session:
+            return {'details': 'The specified session does not exist.'}, 400
+
+        # Ensure that the user has the authority to view this session.
+        if not user.is_or_admin(session.user_id):
+            return {'details': 'You do not have the authority to access this session.'}, 403
+
+        return Utils.serialize(session, True), 200
+
+
+class SendFriendRequest(APIResource):
+    required_parameters = ['user_id']
+
+    def post(self):
+        missing, parameters = self.missing_parameters()
+
+        if missing:
+            return {'missing_parameters': parameters}, 400
+
+        success, response, response_code, session, user = self.verify_session(database)
+
+        if not success:
+            return response, response_code
+
+        # Get the parameters.
+        user_id: int = Utils.safe_int_cast(request.form.get('user_id'))
+
+        # Ensure that the other user exists.
+        other_user = database.get_user(user_id)
+
+        if not other_user:
+            return {'details': 'The specified user does not exist.'}, 400
+
+        # Ensure that the two users are not already friends.
+        if database.are_friends(user.id, user_id):
+            return {'details': 'You are already friends.'}, 400
+
+        # Send the friend request.
+        success, response = database.create_friend_request(user_id, user.id)
+
+        if not success:
+            return response, 400
+
+        return response, 200
+
+
+class DeleteFriendRequest(APIResource):
+    required_parameters = ['request_id']
+
+    def delete(self):
+        missing, parameters = self.missing_parameters()
+
+        if missing:
+            return {'missing_parameters': parameters}, 400
+
+        success, response, response_code, session, user = self.verify_session(database)
+
+        if not success:
+            return response, response_code
+
+        # Get the parameters.
+        request_id: int = Utils.safe_int_cast(request.form.get('request_id'))
+
+        # Ensure that the friend request exists.
+        friend_request = database.get_friend_request_by_id(request_id)
+
+        if not friend_request:
+            return {'details': 'The specified friend request does not exist.'}, 400
+
+        # Ensure that the user has the authority to delete the friend request.
+        if not (friend_request.user_id == user.id or friend_request.from_user_id == user.id or user.administrator):
+            return {'details': 'You cannot delete this friend request.'}, 400
+
+        return {}, 200
+
+
+class AcceptFriendRequest(APIResource):
+    required_parameters = ['request_id']
+
+    def post(self):
+        missing, parameters = self.missing_parameters()
+
+        if missing:
+            return {'missing_parameters': parameters}, 400
+
+        success, response, response_code, session, user = self.verify_session(database)
+
+        if not success:
+            return response, response_code
+
+        # Get the parameters.
+        request_id: int = Utils.safe_int_cast(request.form.get('request_id'))
+
+        # Ensure that the friend request exists.
+        friend_request = database.get_friend_request_by_id(request_id)
+
+        if not friend_request:
+            return {'details': 'The specified friend request does not exist.'}, 400
+
+        # Ensure that the user has the authority to accept the friend request (they aren't the one who sent it).
+        if not friend_request.user_id == user.id:
+            return {'details': 'You cannot accept this friend request.'}, 400
+
+        # Accept the friend request.
+        success, response = database.accept_friend_request(request_id)
+
+        if not success:
+            return response, 400
+
+        return response, 200
+
+
+class RemoveFriend(APIResource):
+    required_parameters = ['user_id']
+
+    def delete(self):
+        missing, parameters = self.missing_parameters()
+
+        if missing:
+            return {'missing_parameters': parameters}, 400
+
+        success, response, response_code, session, user = self.verify_session(database)
+
+        if not success:
+            return response, response_code
+
+        # Get the parameters.
+        user_id: int = Utils.safe_int_cast(request.form.get('user_id'))
+
+        # Ensure that the user exists.
+        target_user = database.get_user(user_id)
+
+        if not target_user:
+            return {'details': 'The specified user does not exist.'}, 400
+
+        # Ensure that the two users are actually friends.
+        if not database.are_friends(user.id, user_id):
+            return {'details': 'You are not friends with this user.'}, 400
+
+        # Remove the user as a friend.
+        success, response = database.remove_friend(user.id, user_id)
+
+        if not success:
+            return response, 400
+
+        return response, 200
+
+
 # Main method.
 def main():
     global email_manager, database, database_utils, file_manager, app, api
@@ -702,6 +1172,20 @@ def main():
     api.add_resource(GetActiveSale, '/api/sales/get')
     api.add_resource(GetAllActiveSales, '/api/sales/get-all')
     api.add_resource(DeleteSale, '/api/sales/delete')
+    api.add_resource(GetTransactions, '/api/user/get-transactions')
+    api.add_resource(GetTransaction, '/api/user/get-transaction')
+    api.add_resource(GetPurchase, '/api/user/get-purchase')
+    api.add_resource(GetDeposit, '/api/user/get-deposit')
+    api.add_resource(GetApplicationKey, '/api/user/get-application-key')
+    api.add_resource(GetApplicationKeys, '/api/user/get-application-keys')
+    api.add_resource(PurchaseApplication, '/api/purchase/application')
+    api.add_resource(PurchaseIAP, '/api/purchase/iap')
+    api.add_resource(GetIAPRecords, '/api/user/get-iap-records')
+    api.add_resource(GetSession, '/api/session/get')
+    api.add_resource(SendFriendRequest, '/api/friend/send-request')
+    api.add_resource(DeleteFriendRequest, '/api/friend/delete-request')
+    api.add_resource(AcceptFriendRequest, '/api/friend/accept-request')
+    api.add_resource(RemoveFriend, '/api/friend/remove')
 
     # Run the HTTP server.
     logger.info('Starting HTTP server.')

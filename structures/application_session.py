@@ -11,5 +11,5 @@ class ApplicationSession(Structure):
         self.id: int = id_
         self.user_id: int = user_id
         self.application_id: int = application_id
-        self.date: date = datetime.strptime(date_, '%Y-%m-%d')
+        self.date: date = datetime.strptime(date_, '%Y-%m-%d').date()
         self.length: int = length

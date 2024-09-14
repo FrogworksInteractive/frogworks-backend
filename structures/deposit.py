@@ -14,4 +14,4 @@ class Deposit(Structure):
         self.user_id = user_id
         self.amount: float = Utils.safe_float_cast(amount)
         self.source: str = source
-        self.date: date = datetime.strptime(date_, '%Y-%m-%d')
+        self.date: date = datetime.strptime(date_, '%Y-%m-%d').date()

@@ -13,4 +13,4 @@ class CloudData(Structure):
         self.user_id: int = user_id
         self.application_id: int = application_id
         self.data: dict = json.loads(data)
-        self.date: date = datetime.strptime(date_, '%Y-%m-%d')
+        self.date: date = datetime.strptime(date_, '%Y-%m-%d').date()

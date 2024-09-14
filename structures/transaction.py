@@ -12,4 +12,4 @@ class Transaction(Structure):
         self.user_id: int = user_id
         self.transaction_id: int = transaction_id
         self.type: str = type_
-        self.date: date = datetime.strptime(date_, '%Y-%m-%d')
+        self.date: date = datetime.strptime(date_, '%Y-%m-%d').date()

@@ -1,5 +1,6 @@
 from flask import request
 from flask_restful import Resource
+from datetime import date
 
 from database import Database
 from structures.session import Session
@@ -43,6 +44,11 @@ class APIResource(Resource):
         # Ensure that the user exists.
         if not user:
             return False, {'details': 'The session\'s user does not exist.'}, 400, None, None
+
+        # The user's session is valid.
+        # Update the session's last activity date to prevent it from being deleted if it has not been updated today.
+        if not session.last_activity == date.today():
+            database.update_session_last_activity(session.id, date.today())
 
         return True, {}, -1, session, user
 

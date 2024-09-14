@@ -14,4 +14,4 @@ class Invite(Structure):
         self.from_user_id: int = from_user_id
         self.application_id: int = application_id
         self.details: dict = json.loads(details)
-        self.date: date = datetime.strptime(date_, "%Y-%m-%d")
+        self.date: date = datetime.strptime(date_, "%Y-%m-%d").date()
