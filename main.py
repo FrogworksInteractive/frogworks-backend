@@ -19,6 +19,7 @@ from email_manager import EmailManager
 from api_resource import APIResource
 from file_manager import FileManager
 from structures.application_session import ApplicationSession
+from structures.iap import IAP
 from structures.iap_record import IAPRecord
 from structures.application_key import ApplicationKey
 from structures.application_version import ApplicationVersion
@@ -162,7 +163,7 @@ class Login(APIResource):
 
 
 class GetUser(APIResource):
-    required_parameters = ['user_id']
+    required_parameters = ['identifier']
 
     def get(self):
         missing, parameters = self.missing_parameters()
@@ -175,19 +176,19 @@ class GetUser(APIResource):
         if not success:
             return response, response_code
 
-        # Get the user.
-        session_user = database.get_user(session.user_id)
-
         # Get the parameters.
-        user_id: int = Utils.safe_int_cast(request.form.get('user_id'))
+        identifier = request.form.get('identifier')
+
+        # Get the optional parameters.
+        identifier_type = request.form.get('identifier_type') if 'identifier_type' in request.form else 'id'
 
         # Get the requested user.
-        user = database.get_user(user_id)
+        target_user = database.get_user(identifier, identifier_type)
 
-        if not user:
+        if not target_user:
             return {'details': 'The specified user does not exist.'}, 400
 
-        return user.into_dict(user.is_or_admin(session_user.id)), 200
+        return target_user.into_dict(target_user.is_or_admin(user.id)), 200
 
 
 class AuthenticateSession(APIResource):
@@ -338,7 +339,7 @@ class UpdateApplicationVersion(APIResource):
             return {'details': 'The specified application does not exist.'}, 400
 
         # Ensure that the user is an owner of this application.
-        if not user.id in application.owners:
+        if not (user.id in application.owners or user.administrator):
             return {'details': 'This is not your application; you cannot update its version.'}, 403
 
         database.update_application_property(application_id, 'latest_version', version)
@@ -436,7 +437,7 @@ class CreateVersion(APIResource):
             return {'details': 'The specified application does not exist.'}, 400
 
         # Ensure that the user is an owner of this application.
-        if not user.id in application.owners:
+        if not (user.id in application.owners or user.administrator):
             return {'details': 'This is not your application; you cannot push versions to it.'}, 403
 
         # Everything is good; create the version.
@@ -538,7 +539,7 @@ class CreateSale(APIResource):
             return {'details': 'The specified application does not exist.'}, 400
 
         # Ensure that the user is an owner of this application.
-        if not user.id in application.owners:
+        if not (user.id in application.owners or user.administrator):
             return {'details': 'This is not your application; you cannot create sales for it.'}, 403
 
         success, response = database.create_sale(application_id, title, description, price, start_date, end_date)
@@ -638,7 +639,7 @@ class DeleteSale(APIResource):
         application = database.get_application(sale.application_id)
 
         # Ensure that the user is an owner of this application.
-        if not user.id in application.owners:
+        if not (user.id in application.owners or user.administrator):
             return {'details': 'This is not your application; you cannot create sales for it.'}, 403
 
         # Delete the sale.
@@ -1389,7 +1390,7 @@ class GetApplicationSessions(APIResource):
             return {'details': 'The specified application does not exist.'}, 400
 
         # Ensure that the user has the authority to access the application sessions.
-        if not ((user in application.owners) or user.administrator):
+        if not (user in application.owners or user.administrator):
             return {'details': 'You do not have the authority to access this application\'s session(s).'}, 403
 
         return {'application_sessions': Utils.serialize(application, user.administrator)}, 200
@@ -1418,13 +1419,16 @@ class CreatePhoto(APIResource):
         file.save(filepath)
 
         # Create the photo's database record.
-        database.create_photo(
+        success, response = database.create_photo(
             filename,
             subfolder,
             date.today()
         )
 
-        return {}, 201
+        if not success:
+            return response, 400
+
+        return response, 201
 
 
 class GetPhoto(APIResource):
@@ -1453,13 +1457,263 @@ class GetPhoto(APIResource):
         return send_file(file_manager.get_photo_filepath(id_), 'image/png')
 
 
+class CreateIAP(APIResource):
+    required_parameters = ['application_id', 'title', 'description', 'price', 'data']
+
+    def post(self):
+        missing, parameters = self.missing_parameters()
+
+        if missing:
+            return {'missing_parameters': parameters}, 400
+
+        success, response, response_code, session, user = self.verify_session(database)
+
+        if not success:
+            return response, response_code
+
+        # Get the parameters.
+        application_id: int = Utils.safe_int_cast(request.form.get('application_id'))
+        title: str = request.form.get('title')
+        description: str = request.form.get('description')
+        price: float = Utils.safe_float_cast(request.form.get('price'))
+        data: dict = json.loads(request.form.get('data'))
+
+        # Ensure that the application exists.
+        application = database.get_application(application_id)
+
+        if not application:
+            return {'details': 'The specified application does not exist.'}, 400
+
+        # Ensure that the user has the authority to create this iap.
+        if not (user.id in application.owners or user.administrator):
+            return {'details': 'You do not have the authority to create an iap for this application.'}, 403
+
+        # Create the iap.
+        success, response = database.create_iap(
+            application_id,
+            title,
+            description,
+            price,
+            data
+        )
+
+        if not success:
+            return response, 400
+
+        return response, 200
+
+
+class GetIAP(APIResource):
+    required_parameters = ['id']
+
+    def get(self):
+        missing, parameters = self.missing_parameters()
+
+        if missing:
+            return {'missing_parameters': parameters}, 400
+
+        success, response, response_code, session, user = self.verify_session(database)
+
+        if not success:
+            return response, response_code
+
+        # Get the parameters.
+        id_: int = Utils.safe_int_cast(request.form.get('id'))
+
+        # Ensure that the iap exists.
+        iap = database.get_iap(id_)
+
+        if not iap:
+            return {'details': 'The specified iap does not exist.'}, 400
+
+        # Get the application.
+        application = database.get_application(id_)
+
+        if not application:
+            return {'details': 'The specified application does not exist.'}, 400
+
+        return Utils.serialize(iap, user.administrator or user.id in application.owners)
+
+
+class GetIAPs(APIResource):
+    required_parameters = ['application_id']
+
+    def get(self):
+        missing, parameters = self.missing_parameters()
+
+        if missing:
+            return {'missing_parameters': parameters}, 400
+
+        success, response, response_code, session, user = self.verify_session(database)
+
+        if not success:
+            return response, response_code
+
+        # Get the parameters.
+        application_id: int = Utils.safe_int_cast(request.form.get('application_id'))
+
+        # Ensure that the application exists.
+        application = database.get_application(application_id)
+
+        if not application:
+            return {'details': 'The specified application does not exist.'}, 400
+
+        # Get the iaps for the specified application.
+        iaps: list[IAP] = database.get_iaps_for_application(application_id)
+
+        return {'iaps': Utils.serialize(iaps, user.administrator or user.id in application.owners)}, 200
+
+
+class UploadCloudData(APIResource):
+    required_parameters = ['user_id', 'application_id', 'data']
+
+    def post(self):
+        missing, parameters = self.missing_parameters()
+
+        if missing:
+            return {'missing_parameters': parameters}, 400
+
+        success, response, response_code, session, user = self.verify_session(database)
+
+        if not success:
+            return response, response_code
+
+        # Get the parameters.
+        user_id: int = Utils.safe_int_cast(request.form.get('user_id'))
+        application_id: int = Utils.safe_int_cast(request.form.get('application_id'))
+        data: dict = json.loads(request.form.get('data'))
+
+        # Ensure that the user has the authority to create the cloud data.
+        if not user.is_or_admin(user_id):
+            return {'details': 'You do not have the authority to upload cloud data for this user.'}, 403
+
+        # Ensure that the user owns this application.
+        if not database_utils.user_owns(user_id, application_id):
+            return {'details': 'You do not own this application, and thus cannot upload cloud data for it.'}, 400
+
+        # Save the cloud data.
+        database.create_cloud_data(
+            user_id,
+            application_id,
+            data
+        )
+
+        return {}, 201
+
+
+class GetCloudData(APIResource):
+    required_parameters = ['user_id', 'application_id']
+
+    def get(self):
+        missing, parameters = self.missing_parameters()
+
+        if missing:
+            return {'missing_parameters': parameters}, 400
+
+        success, response, response_code, session, user = self.verify_session(database)
+
+        if not success:
+            return response, response_code
+
+        # Get the parameters.
+        user_id: int = Utils.safe_int_cast(request.form.get('user_id'))
+        application_id: int = Utils.safe_int_cast(request.form.get('application_id'))
+
+        # Ensure that the user exists.
+        target_user = database.get_user(user_id)
+
+        if not target_user:
+            return {'details': 'The specified user does not exist.'}, 400
+
+        # Ensure that the user has the authority to access the cloud data.
+        if not target_user.is_or_admin(user_id):
+            return {'details': 'You do not have the authority to view this user\'s cloud data.'}, 403
+
+        # Get the data.
+        cloud_data = database.get_cloud_data(user_id, application_id)
+
+        if not cloud_data:
+            return {'details': 'The specified cloud data does not exist.'}, 400
+
+        return Utils.serialize(cloud_data, True)
+
+
+class DeleteCloudData(APIResource):
+    required_parameters = ['user_id', 'application_id']
+
+    def delete(self):
+        missing, parameters = self.missing_parameters()
+
+        if missing:
+            return {'missing_parameters': parameters}, 400
+
+        success, response, response_code, session, user = self.verify_session(database)
+
+        if not success:
+            return response, response_code
+
+        # Get the parameters.
+        user_id: int = Utils.safe_int_cast(request.form.get('user_id'))
+        application_id: int = Utils.safe_int_cast(request.form.get('application_id'))
+
+        # Ensure that the user exists.
+        target_user = database.get_user(user_id)
+
+        if not target_user:
+            return {'details': 'The specified user does not exist.'}, 400
+
+        # Ensure that the application exists.
+        application = database.get_application(application_id)
+
+        if not application:
+            return {'details': 'The specified application does not exist.'}, 400
+
+        # Ensure that the user has the authority to delete the cloud data.
+        if not user.is_or_admin(user_id):
+            return {'details': 'You do not have the authority to delete this user\'s cloud data.'}, 403
+
+        database.delete_cloud_data(user_id, application_id)
+
+        return {}, 200
+
+
+class DeleteApplicationCloudData(APIResource):
+    required_parameters = ['application_id']
+
+    def delete(self):
+        missing, parameters = self.missing_parameters()
+
+        if missing:
+            return {'missing_parameters': parameters}, 400
+
+        success, response, response_code, session, user = self.verify_session(database)
+
+        if not success:
+            return response, response_code
+
+        # Get the parameters.
+        application_id: int = Utils.safe_int_cast(request.form.get('application_id'))
+
+        # Ensure that the application exists.
+        application = database.get_application(application_id)
+
+        if not application:
+            return {'details': 'The specified application does not exist.'}, 400
+
+        # Ensure that the user has the authority to delete the cloud data for this application.
+        if not (user.administrator or user.id in application.owners):
+            return {'details': 'You do not have the authority to delete this application\'s cloud data.'}, 403
+
+        database.delete_application_cloud_data(application_id)
+
+
 # Main method.
 def main():
     global email_manager, database, database_utils, file_manager, app, api
 
     # Initialize the logger.
     logger.remove()
-    logger.add('logs/frogworks_{time}.log', rotation='1 week', retention=5, level='INFO')
+    logger.add('logs/frogworks_{time}.log', retention=5, level='INFO')
     logger.add(sys.stdout, level='INFO')
 
     # Load the .env environment variables.
@@ -1533,6 +1787,13 @@ def main():
     api.add_resource(DeleteInvite, '/api/user/delete-invite')
     api.add_resource(CreatePhoto, '/api/photo/create')
     api.add_resource(GetPhoto, '/api/photo/get')
+    api.add_resource(CreateIAP, '/api/iap/create')
+    api.add_resource(GetIAP, '/api/iap/get')
+    api.add_resource(GetIAPs, '/api/application/get-iaps')
+    api.add_resource(UploadCloudData, '/api/cloud-data/upload')
+    api.add_resource(GetCloudData, '/api/cloud-data/get')
+    api.add_resource(DeleteCloudData, '/api/cloud-data/delete')
+    api.add_resource(DeleteApplicationCloudData, '/api/application/delete-cloud-data')
 
     # Run the HTTP server.
     logger.info('Starting HTTP server.')
