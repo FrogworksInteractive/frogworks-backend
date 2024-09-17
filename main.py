@@ -1396,6 +1396,7 @@ class GetApplicationSessions(APIResource):
 
 
 class CreatePhoto(APIResource):
+    required_parameters = ['subfolder']
     required_files = ['photo']
 
     def post(self):
@@ -1407,7 +1408,23 @@ class CreatePhoto(APIResource):
         # Get the file.
         file = request.files['photo']
 
-        # TODO: Complete this route.
+        # Get the parameters.
+        subfolder = request.form.get('subfolder')
+
+        # Save the file.
+        filename = Utils.generate_uuid4() + secure_filename(file.filename)
+        filepath = file_manager.generate_photo_filepath(subfolder, filename)
+
+        file.save(filepath)
+
+        # Create the photo's database record.
+        database.create_photo(
+            filename,
+            subfolder,
+            date.today()
+        )
+
+        return {}, 201
 
 
 class GetPhoto(APIResource):
