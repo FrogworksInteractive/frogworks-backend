@@ -1,3 +1,4 @@
+import json
 import os
 import sys
 
@@ -9,6 +10,7 @@ from loguru import logger
 # Flask-related imports.
 from flask import Flask, request, send_file
 from flask_restful import Api
+from werkzeug.utils import secure_filename
 
 # Local imports.
 from database import Database
@@ -16,6 +18,7 @@ from database_utils import DatabaseUtils
 from email_manager import EmailManager
 from api_resource import APIResource
 from file_manager import FileManager
+from structures.application_session import ApplicationSession
 from structures.iap_record import IAPRecord
 from structures.application_key import ApplicationKey
 from structures.application_version import ApplicationVersion
@@ -29,6 +32,7 @@ from utils import Utils
 BASE_DIRECTORY: str = 'data'
 PHOTOS_DIRECTORY: str = 'photos'
 APPLICATIONS_DIRECTORY: str = 'applications'
+ALLOWED_IMAGE_TYPES: list = ['png', 'jpg', 'jpeg']
 
 
 # Variables.
@@ -461,7 +465,7 @@ class CreateVersion(APIResource):
         version_file = request.files['file']
 
         # Save the version file.
-        version_file.save(file_manager.generate_version_filepath(application.package_name, filename))
+        version_file.save(file_manager.generate_version_filepath(application.package_name, secure_filename(filename)))
 
         return response, 200
 
@@ -1113,6 +1117,325 @@ class RemoveFriend(APIResource):
         return response, 200
 
 
+class DeleteSpecificSession(APIResource):
+    required_parameters = ['session_id']
+
+    def delete(self):
+        missing, parameters = self.missing_parameters()
+
+        if missing:
+            return {'missing_parameters': parameters}, 400
+
+        success, response, response_code, session, user = self.verify_session(database)
+
+        if not success:
+            return response, response_code
+
+        # Get the parameters.
+        session_id: int = Utils.safe_int_cast(request.form.get('session_id'))
+
+        # Ensure that the session exists.
+        target_session = database.get_session(session_id, 'id')
+
+        if not target_session:
+            return {'details': 'The specified session does not exist.'}, 400
+
+        # Ensure that the user has the authority to delete this session.
+        if not user.is_or_admin(target_session.user_id):
+            return {'details': 'You do not have the authority to delete this session.'}, 403
+
+        # Delete the session.
+        database.delete_session(session_id)
+
+        return {}, 200
+
+
+class SendInvite(APIResource):
+    required_parameters = ['user_id', 'application_id', 'details']
+
+    def post(self):
+        missing, parameters = self.missing_parameters()
+
+        if missing:
+            return {'missing_parameters': parameters}, 400
+
+        success, response, response_code, session, user = self.verify_session(database)
+
+        if not success:
+            return response, response_code
+
+        # Get the parameters.
+        user_id: int = Utils.safe_int_cast(request.form.get('user_id'))
+        application_id: int = Utils.safe_int_cast(request.form.get('application_id'))
+        details: dict = json.loads(request.form.get('details'))
+
+        # Send the invite.
+        database.create_invite(user_id, user.id, application_id, details, date.today())
+
+        return {}, 200
+
+
+class GetInvites(APIResource):
+    required_parameters = ['user_id']
+
+    def get(self):
+        missing, parameters = self.missing_parameters()
+
+        if missing:
+            return {'missing_parameters': parameters}, 400
+
+        success, response, response_code, session, user = self.verify_session(database)
+
+        if not success:
+            return response, response_code
+
+        # Get the parameters.
+        user_id: int = Utils.safe_int_cast(request.form.get('user_id'))
+
+        # Ensure that the user exists.
+        target_user = database.get_user(user_id)
+
+        if not target_user:
+            return {'details': 'The specified user does not exist.'}, 400
+
+        # Ensure that the user has the authority to view the invites.
+        if not user.is_or_admin(user_id):
+            return {'details': 'You do not have the authority to access this user\'s invites.'}, 403
+
+        # Get the optional parameters.
+        application_id: int = Utils.safe_int_cast(request.form.get('application_id')) if 'application_id' in request.form else -1
+
+        # Get the invites.
+        invites = database.get_user_invites(user_id) if application_id == -1 else database.get_user_invites_for(user_id, application_id)
+
+        return {'invites': Utils.serialize(invites, True)}, 200
+
+
+class GetInvite(APIResource):
+    required_parameters = ['invite_id']
+
+    def get(self):
+        missing, parameters = self.missing_parameters()
+
+        if missing:
+            return {'missing_parameters': parameters}, 400
+
+        success, response, response_code, session, user = self.verify_session(database)
+
+        if not success:
+            return response, response_code
+
+        # Get the parameters.
+        invite_id: int = Utils.safe_int_cast(request.form.get('invite_id'))
+
+        # Ensure that the invite exists.
+        invite = database.get_invite_by_id(invite_id)
+
+        if not invite:
+            return {'details': 'The specified invite does not exist.'}, 400
+
+        # Ensure that the user has the authority to access this invite.
+        if not user.is_or_admin(invite.user_id):
+            return {'details': 'You do not have the authority to access this invite.'}, 403
+
+        return Utils.serialize(invite, True)
+
+
+class DeleteInvite(APIResource):
+    required_parameters = ['invite_id']
+
+    def delete(self):
+        missing, parameters = self.missing_parameters()
+
+        if missing:
+            return {'missing_parameters': parameters}, 400
+
+        success, response, response_code, session, user = self.verify_session(database)
+
+        if not success:
+            return response, response_code
+
+        # Get the parameters.
+        invite_id: int = Utils.safe_int_cast(request.form.get('invite_id'))
+
+        # Ensure that the invite exists.
+        invite = database.get_invite_by_id(invite_id)
+
+        if not invite:
+            return {'details': 'The specified invite does not exist.'}, 400
+
+        # Ensure that the user has the authority to delete this invite.
+        if not user.is_or_admin(invite.user_id):
+            return {'details': 'You do not have the authority to delete this invite.'}, 403
+
+        # Delete the invite.
+        database.delete_invite(invite_id)
+
+        return {}, 200
+
+
+class CreateApplicationSession(APIResource):
+    required_parameters = ['application_id', 'length']
+
+    def post(self):
+        missing, parameters = self.missing_parameters()
+
+        if missing:
+            return {'missing_parameters': parameters}, 400
+
+        success, response, response_code, session, user = self.verify_session(database)
+
+        if not success:
+            return response, response_code
+
+        # Get the parameters.
+        application_id: int = Utils.safe_int_cast(request.form.get('application_id'))
+        length: int = Utils.safe_int_cast(request.form.get('length'))
+
+        # Create the application session.
+        database.create_application_session(
+            user.id,
+            application_id,
+            date.today(),
+            length
+        )
+
+        return {}, 200
+
+
+class GetApplicationSession(APIResource):
+    required_parameters = ['id']
+
+    def get(self):
+        missing, parameters = self.missing_parameters()
+
+        if missing:
+            return {'missing_parameters': parameters}, 400
+
+        success, response, response_code, session, user = self.verify_session(database)
+
+        if not success:
+            return response, response_code
+
+        # Get the parameters.
+        id_: int = Utils.safe_int_cast(request.form.get('id'))
+
+        # Ensure that the application session exists.
+        application_session = database.get_application_session(id_)
+
+        if not application_session:
+            return {'details': 'The specified application session does not exist.'}, 400
+
+        # Ensure that the user has the authority to access this application session.
+        if not user.is_or_admin(application_session.user_id):
+            return {'details': 'You do not have the authority to access this application session.'}, 403
+
+        return Utils.serialize(application_session, True)
+
+
+class GetUserApplicationSessions(APIResource):
+    required_parameters = ['user_id']
+
+    def get(self):
+        missing, parameters = self.missing_parameters()
+
+        if missing:
+            return {'missing_parameters': parameters}, 400
+
+        success, response, response_code, session, user = self.verify_session(database)
+
+        if not success:
+            return response, response_code
+
+        # Get the parameters.
+        user_id: int = Utils.safe_int_cast(request.form.get('user_id'))
+
+        # Ensure that the user has the authority to get the application sessions.
+        if not user.is_or_admin(user_id):
+            return {'details': 'You do not have the authority to access this user\'s application session(s).'}, 403
+
+        # Get the optional parameters.
+        application_id: int = Utils.safe_int_cast(request.form.get('application_id')) \
+            if 'application_id' in request.form \
+            else -1
+
+        # Get the application sessions.
+        application_sessions: list[ApplicationSession] = database.get_user_application_sessions(user_id, application_id)
+
+        return {'application_sessions': Utils.serialize(application_sessions, True)}, 200
+
+
+class GetApplicationSessions(APIResource):
+    required_parameters = ['application_id']
+
+    def get(self):
+        missing, parameters = self.missing_parameters()
+
+        if missing:
+            return {'missing_parameters': parameters}, 400
+
+        success, response, response_code, session, user = self.verify_session(database)
+
+        if not success:
+            return response, response_code
+
+        # Get the parameters.
+        application_id: int = Utils.safe_int_cast(request.form.get('application_id'))
+
+        # Ensure that the application exists.
+        application = database.get_application(application_id)
+
+        if not application:
+            return {'details': 'The specified application does not exist.'}, 400
+
+        # Ensure that the user has the authority to access the application sessions.
+        if not ((user in application.owners) or user.administrator):
+            return {'details': 'You do not have the authority to access this application\'s session(s).'}, 403
+
+        return {'application_sessions': Utils.serialize(application, user.administrator)}, 200
+
+
+class CreatePhoto(APIResource):
+    required_files = ['photo']
+
+    def post(self):
+        missing_files, missing_files_list = self.missing_files()
+
+        if missing_files:
+            return {'details': 'You must provide a photo.'}, 400
+
+        # Get the file.
+        file = request.files['photo']
+
+        # TODO: Complete this route.
+
+
+class GetPhoto(APIResource):
+    required_parameters = ['id']
+
+    def get(self):
+        missing, parameters = self.missing_parameters()
+
+        if missing:
+            return {'missing_parameters': parameters}, 400
+
+        success, response, response_code, session, user = self.verify_session(database)
+
+        if not success:
+            return response, response_code
+
+        # Get the parameters.
+        id_: int = Utils.safe_int_cast(request.form.get('id'))
+
+        # Ensure that the photo exists.
+        photo = database.get_photo_by_id(id_)
+
+        if not photo:
+            return {'details': 'The specified photo does not exist.'}, 400
+
+        return send_file(file_manager.get_photo_filepath(id_), 'image/png')
+
+
 # Main method.
 def main():
     global email_manager, database, database_utils, file_manager, app, api
@@ -1162,6 +1485,7 @@ def main():
     api.add_resource(GetUser, '/api/user/get')
     api.add_resource(AuthenticateSession, '/api/session/authenticate')
     api.add_resource(DeleteSession, '/api/session/delete')
+    api.add_resource(DeleteSpecificSession, '/api/session/delete-specific')
     api.add_resource(CreateApplication, '/api/application/create')
     api.add_resource(GetApplication, '/api/application/get')
     api.add_resource(GetApplicationVersions, '/api/application/versions')
@@ -1186,6 +1510,12 @@ def main():
     api.add_resource(DeleteFriendRequest, '/api/friend/delete-request')
     api.add_resource(AcceptFriendRequest, '/api/friend/accept-request')
     api.add_resource(RemoveFriend, '/api/friend/remove')
+    api.add_resource(SendInvite, '/api/user/send-invite')
+    api.add_resource(GetInvites, '/api/user/get-invites')
+    api.add_resource(GetInvite, '/api/user/get-invite')
+    api.add_resource(DeleteInvite, '/api/user/delete-invite')
+    api.add_resource(CreatePhoto, '/api/photo/create')
+    api.add_resource(GetPhoto, '/api/photo/get')
 
     # Run the HTTP server.
     logger.info('Starting HTTP server.')

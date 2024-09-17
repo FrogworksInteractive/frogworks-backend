@@ -1021,6 +1021,18 @@ class Database:
 
         return invites
 
+    def get_user_invites_for(self, user_id: int, application_id: int) -> list[Invite]:
+        invites: list[Invite] = []
+
+        # Get all invites for a user in a specific application.
+        self.cursor.execute('SELECT * FROM `invites` WHERE `user_id` = ? AND `application_id` = ?', (user_id, application_id))
+
+        # Loop through all the invites.
+        for invite in self.cursor.fetchall():
+            invites.append(Utils.row_to_invite(invite))
+
+        return invites
+
     def delete_invite(self, id_: int):
         # Attempt to delete the specified invite.
         self.cursor.execute('DELETE FROM `invites` WHERE `id` = ?', (id_,))
