@@ -340,7 +340,7 @@ class Database:
 
         # Initialize the other properties with default values.
         balance: str = '0'
-        profile_photo_id: int = 1
+        profile_photo_id: int = 0
         activity: dict = Utils.generate_activity_dict(-1, '', {})
 
         # Handle the kwargs.
@@ -672,7 +672,7 @@ class Database:
     def get_transaction_for(self, transaction_id: int) -> Transaction | None:
         # Attempt to get a transaction for a specified transaction id (useful for reverse lookup on deposits and
         # purchases).
-        self.cursor.execute('SELECT * FROM `transactions` WHERE `transaction_id` = ?`', (transaction_id,))
+        self.cursor.execute('SELECT * FROM `transactions` WHERE `transaction_id` = ?', (transaction_id,))
         row = self.cursor.fetchone()
 
         if row is None:
