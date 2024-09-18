@@ -24,6 +24,7 @@ from structures.iap_record import IAPRecord
 from structures.application_key import ApplicationKey
 from structures.application_version import ApplicationVersion
 from structures.sale import Sale
+from structures.session import Session
 from structures.transaction import Transaction
 from structures.user import User
 from utils import Utils
@@ -934,6 +935,11 @@ class GetIAPRecords(APIResource):
         user_id: int = Utils.safe_int_cast(request.form.get('user_id'))
         application_id: int = Utils.safe_int_cast(request.form.get('application_id'))
 
+        # Get the optional parameters.
+        only_unacknowledged: bool = Utils.safe_bool_cast(request.form.get('only_unacknowledged')) \
+            if 'only_unacknowledged' in request.form \
+            else False
+
         # Ensure that the user exists.
         target_user = database.get_user(user_id)
 
@@ -945,7 +951,7 @@ class GetIAPRecords(APIResource):
             return {'details': 'You do not have the authority to access this user\'s iap records(s).'}, 403
 
         # Get the iap records.
-        records: list[IAPRecord] = database.get_iap_records(user_id, application_id)
+        records: list[IAPRecord] = database.get_iap_records(user_id, application_id, only_unacknowledged)
 
         return {'iap_records': Utils.serialize(records, True)}, 200
 
@@ -1401,6 +1407,16 @@ class CreatePhoto(APIResource):
     required_files = ['photo']
 
     def post(self):
+        missing, parameters = self.missing_parameters()
+
+        if missing:
+            return {'missing_parameters': parameters}, 400
+
+        success, response, response_code, session, user = self.verify_session(database)
+
+        if not success:
+            return response, response_code
+
         missing_files, missing_files_list = self.missing_files()
 
         if missing_files:
@@ -1411,6 +1427,9 @@ class CreatePhoto(APIResource):
 
         # Get the parameters.
         subfolder = request.form.get('subfolder')
+
+        # Ensure that the subdirectory exists.
+        os.makedirs(os.path.join(file_manager.photos_directory, subfolder), exist_ok=True)
 
         # Save the file.
         filename = Utils.generate_uuid4() + secure_filename(file.filename)
@@ -1706,6 +1725,142 @@ class DeleteApplicationCloudData(APIResource):
 
         database.delete_application_cloud_data(application_id)
 
+        return {}, 200
+
+
+class UpdateProfilePhoto(APIResource):
+    required_parameters = ['user_id', 'photo_id']
+
+    def put(self):
+        missing, parameters = self.missing_parameters()
+
+        if missing:
+            return {'missing_parameters': parameters}, 400
+
+        success, response, response_code, session, user = self.verify_session(database)
+
+        if not success:
+            return response, response_code
+
+        # Get the parameters.
+        user_id: int = Utils.safe_int_cast(request.form.get('user_id'))
+        photo_id: int = Utils.safe_int_cast(request.form.get('photo_id'))
+
+        # Ensure that the user exists.
+        target_user = database.get_user(user_id)
+
+        if not target_user:
+            return {'details': 'The specified user does not exist.'}, 400
+
+        # Ensure that the photo exists or is the default (0).
+        photo = database.get_photo_by_id(photo_id)
+
+        if (not photo) and photo_id != 0:
+            return {'details': 'The specified photo does not exist.'}, 400
+
+        # Ensure that the user has the authority to change the profile photo.
+        if not user.is_or_admin(user_id):
+            return {'details': 'You do not have the authority to change this user\'s profile photo.'}, 403
+
+        # Update the user's profile photo.
+        database.update_user_property(user_id, 'profile_photo_id', photo_id)
+
+        return {}, 200
+
+
+class GetUserSessions(APIResource):
+    required_parameters = ['user_id']
+
+    def get(self):
+        missing, parameters = self.missing_parameters()
+
+        if missing:
+            return {'missing_parameters': parameters}, 400
+
+        success, response, response_code, session, user = self.verify_session(database)
+
+        if not success:
+            return response, response_code
+
+        # Get the parameters.
+        user_id: int = Utils.safe_int_cast(request.form.get('user_id'))
+
+        # Ensure that the user exists.
+        target_user = database.get_user(user_id)
+
+        if not target_user:
+            return {'details': 'The specified user does not exist.'}, 400
+
+        # Ensure that the user has the authority to view the application sessions.
+        if not user.is_or_admin(user_id):
+            return {'details': 'You do not have the authority to view this user\'s sessions.'}, 403
+
+        sessions: list[Session] = database.get_sessions_for(user_id)
+
+        return {'sessions': Utils.serialize(sessions, True)}, 200
+
+
+class GetIAPRecord(APIResource):
+    required_parameters = ['id']
+
+    def get(self):
+        missing, parameters = self.missing_parameters()
+
+        if missing:
+            return {'missing_parameters': parameters}, 400
+
+        success, response, response_code, session, user = self.verify_session(database)
+
+        if not success:
+            return response, response_code
+
+        # Get parameters.
+        id_: int = Utils.safe_int_cast(request.form.get('id'))
+
+        # Ensure that the iap record exists.
+        iap_record = database.get_iap_record(id_)
+
+        if not iap_record:
+            return {'details': 'The specified IAP record does not exist.'}, 400
+
+        # Ensure that the user has the authority to view the iap record.
+        if not user.is_or_admin(iap_record.user_id):
+            return {'details': 'You do not have the authority to view this IAP record.'}, 403
+
+        return Utils.serialize(iap_record, True)
+
+
+class AcknowledgeIAPRecord(APIResource):
+    required_parameters = ['id']
+
+    def put(self):
+        missing, parameters = self.missing_parameters()
+
+        if missing:
+            return {'missing_parameters': parameters}, 400
+
+        success, response, response_code, session, user = self.verify_session(database)
+
+        if not success:
+            return response, response_code
+
+        # Get the parameters.
+        id_: int = Utils.safe_int_cast(request.form.get('id'))
+
+        # Ensure that the iap record exists.
+        iap_record = database.get_iap_record(id_)
+
+        if not iap_record:
+            return {'details': 'The specified IAP record does not exist.'}, 400
+
+        # Ensure that the user has the authority to acknowledge this iap record.
+        if not user.is_or_admin(iap_record.user_id):
+            return {'details': 'You do not have the authority to acknowledge this IAP record.'}, 403
+
+        database.acknowledge_iap_record(id_)
+
+        return {}, 200
+
 
 # Main method.
 def main():
@@ -1794,6 +1949,10 @@ def main():
     api.add_resource(GetCloudData, '/api/cloud-data/get')
     api.add_resource(DeleteCloudData, '/api/cloud-data/delete')
     api.add_resource(DeleteApplicationCloudData, '/api/application/delete-cloud-data')
+    api.add_resource(UpdateProfilePhoto, '/api/user/update-profile-photo')
+    api.add_resource(GetUserSessions, '/api/user/get-sessions')
+    api.add_resource(GetIAPRecord, '/api/iap-record/get')
+    api.add_resource(AcknowledgeIAPRecord, '/api/iap-record/acknowledge')
 
     # Run the HTTP server.
     logger.info('Starting HTTP server.')
