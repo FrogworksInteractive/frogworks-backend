@@ -282,7 +282,7 @@ class Database:
 
     def request_email_verification_code(self, email_address: str):
         # Delete all previous verification codes for the specified email.
-        self.cursor.execute('DELETE FROM `email_codes` WHERE `email_address` = ? COLLATE NOCASE', (email_address,))
+        self.delete_email_verification_codes_for(email_address)
 
         # Generate a new verification code.
         verification_code: int = Utils.generate_verification_code()
@@ -309,6 +309,16 @@ class Database:
             html,
             [email_address]
         )
+
+    def delete_email_verification_codes_for(self, email_address: str):
+        # Delete all verification codes for the specified email address.
+        self.cursor.execute('DELETE FROM `email_codes` WHERE `email_address` = ? COLLATE NOCASE', (email_address,))
+
+        # Commit the changes.
+        self.connection.commit()
+
+        logger.info(f'Deleting email verification code for {email_address}')
+
 
     def package_name_taken(self, package_name: str) -> bool:
         # Check if an application exists with that package name.
@@ -357,7 +367,28 @@ class Database:
         # Commit the changes.
         self.connection.commit()
 
-        logger.info(f'Created user: {username} - name: {name}, email address: {email_address}')
+        logger.info(f'Created user: {username} - name: {name}, email address: {email_address}, '
+                    f'identifier: {identifier}')
+
+        # Delete the user's email verification code so that it cannot be used again.
+        self.delete_email_verification_codes_for(email_address)
+
+        # Generate the registration email.
+        subject, text, html = EmailUtils.generate_email(
+            'Welcome to Frogworks!',
+            'Account Created',
+            f'Thank you for joining Frogworks! We are glad to have you!<br><br>Let\'s go over your account '
+            f'details just so you\'re aware!<br>Frogworks ID: {identifier}<br>Username: {username}',
+            'You can modify most parts of your account at any time.'
+        )
+
+        # Send the registration email.
+        self.email_manager.send_email(
+            subject,
+            text,
+            html,
+            [email_address]
+        )
 
         return True, {'details': 'User created successfully.'}
 

@@ -33,4 +33,4 @@ class User(Structure):
         return self.developer or self.administrator
 
     def is_or_admin(self, id_: int) -> bool:
-        return self.id == id_ or self.administrator
+        return (self.id == id_) or self.administrator

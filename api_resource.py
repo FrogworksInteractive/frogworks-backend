@@ -54,7 +54,7 @@ class APIResource(Resource):
 
     @staticmethod
     def get_authentication() -> tuple[bool, str | None]:
-        auth_header = request.headers.get('SessionId')
+        auth_header = request.headers.get('Session-Id')
 
         if auth_header:
             return True, auth_header

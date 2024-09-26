@@ -1,6 +1,7 @@
 import json
 import os
 import sys
+from time import strftime
 
 from dotenv import load_dotenv
 from datetime import datetime
@@ -17,6 +18,7 @@ from database import Database
 from database_utils import DatabaseUtils
 from email_manager import EmailManager
 from api_resource import APIResource
+from email_utils import EmailUtils
 from file_manager import FileManager
 from structures.application_session import ApplicationSession
 from structures.iap import IAP
@@ -113,7 +115,7 @@ class Register(APIResource):
         success, response = database.create_user(username, name, email_address, password, email_verification_code)
 
         if success:
-            return response
+            return response, 201
         else:
             return response, 400
 
@@ -153,6 +155,22 @@ class Login(APIResource):
         success, response = (
             database.create_session(user.id, hostname, mac_address, platform, date.today(), date.today()))
 
+        # Generate the login email.
+        subject, text, html = EmailUtils.generate_email(
+            'Frogworks Login Notification',
+            'New Session Created',
+            f'Someone recently logged into your Frogworks account, we just thought you\'d like to know.<br><br>Device Details:<br>Hostname: {hostname}<br>MAC Address: {mac_address}<br>Platform: {platform}<br><br>If this wasn\'t you, please take these steps:<br><ul><li>Change your password to one that is more secure</li><li>End the new session (or all your sessions)</li><ul><li>You can do this from the launcher, in the sessions UI</li></ul></ul>',
+            'Ensure that your account is secure.'
+        )
+
+        # Send the verification email.
+        email_manager.send_email(
+            subject,
+            text,
+            html,
+            [user.email_address]
+        )
+
         if not success:
             return {'details': 'Failed to create session.', 'additional_data': response}, 400
 
@@ -189,7 +207,7 @@ class GetUser(APIResource):
         if not target_user:
             return {'details': 'The specified user does not exist.'}, 400
 
-        return target_user.into_dict(target_user.is_or_admin(user.id)), 200
+        return target_user.into_dict(user.is_or_admin(target_user.id)), 200
 
 
 class AuthenticateSession(APIResource):
@@ -286,7 +304,7 @@ class CreateApplication(APIResource):
         if not success:
             return response, 400
 
-        return {'details': 'Successfully created application.', 'application_id': response['application_id']}, 200
+        return {'details': 'Successfully created application.', 'application_id': response['application_id']}, 201
 
 
 class GetApplication(APIResource):
@@ -1307,7 +1325,7 @@ class CreateApplicationSession(APIResource):
             length
         )
 
-        return {}, 200
+        return {}, 201
 
 
 class GetApplicationSession(APIResource):
@@ -1862,6 +1880,72 @@ class AcknowledgeIAPRecord(APIResource):
         return {}, 200
 
 
+class ChangePassword(APIResource):
+    required_parameters = ['user_id', 'password']
+
+    def put(self):
+        missing, parameters = self.missing_parameters()
+
+        if missing:
+            return {'missing_parameters': parameters}, 400
+
+        success, response, response_code, session, user = self.verify_session(database)
+
+        if not success:
+            return response, response_code
+
+        # Get the parameters.
+        user_id: int = Utils.safe_int_cast(request.form.get('user_id'))
+        password: str = request.form.get('password')
+
+        # Ensure that the target user exists.
+        target_user = database.get_user(user_id)
+
+        if not target_user:
+            return {'details': 'The specified user does not exist.'}, 400
+
+        # Ensure that the user has the authority to change this user's password.
+        if not user.is_or_admin(user_id):
+            return {'details': 'You do not have the authority to change this user\'s password.'}, 403
+
+        # Hash the password.
+        hashed_password = Utils.hash_password(password)
+
+        # Update the user's password.
+        database.update_user_property(user_id, 'password', hashed_password)
+
+        return {'details': 'Password updated successfully.'}, 200
+
+
+class GetApplicationVersion(APIResource):
+    required_parameters = ['version_id']
+
+    def get(self):
+        missing, parameters = self.missing_parameters()
+
+        if missing:
+            return {'missing_parameters': parameters}, 400
+
+        success, response, response_code, session, user = self.verify_session(database)
+
+        if not success:
+            return response, response_code
+        # Get the parameters.
+        version_id: int = Utils.safe_int_cast(request.form.get('version_id'))
+
+        # Get the version.
+        version = database.get_application_version_by_id(version_id)
+
+        if not version:
+            return {'details': 'The specified version does not exist.'}, 400
+
+        # Verify that the user owns the specified application.
+        if not database_utils.user_owns(user.id, version.application_id):
+            return {'details': 'You do not own this application.'}, 403
+
+        return Utils.serialize(version)
+
+
 # Main method.
 def main():
     global email_manager, database, database_utils, file_manager, app, api
@@ -1953,13 +2037,25 @@ def main():
     api.add_resource(GetUserSessions, '/api/user/get-sessions')
     api.add_resource(GetIAPRecord, '/api/iap-record/get')
     api.add_resource(AcknowledgeIAPRecord, '/api/iap-record/acknowledge')
+    api.add_resource(ChangePassword, '/api/user/change-password')
+    api.add_resource(GetApplicationVersion, '/api/application/versions/get-specific')
+    api.add_resource(GetVersion, '/api/application/versions/get/fine-tuned')
+
+    # Set up some loggers.
+    @app.after_request
+    def after_request(response):
+        timestamp = strftime('[%Y-%b-%d %H:%M]')
+        logger.info(f'{timestamp} {request.remote_addr} {request.method} {request.scheme} {request.full_path} {response.status}\nHeaders:\n{request.headers}')
+
+        return response
 
     # Run the HTTP server.
     logger.info('Starting HTTP server.')
     app.run(
         host='0.0.0.0',
         port=server_port,
-        debug=True
+        debug=True,
+        threaded=True
     )
 
 
