@@ -806,7 +806,7 @@ class Database:
         if existing_request:
             return False, {'details': 'Friend request already exists.'}
 
-        # Ensure that the user is not sending a friend request to their self somehow.
+        # Ensure that the user is not sending a friend request to themselves somehow.
         if user_id == from_user_id:
             return False, {'details': 'You cannot send a friend request to yourself.'}
 
@@ -819,7 +819,7 @@ class Database:
         self.cursor.execute('''
         INSERT INTO `friend_requests` (`user_id`, `from_user_id`, `date`)
         VALUES (?, ?, ?)
-        ''', (from_user_id, user_id, date.today()))
+        ''', (user_id, from_user_id, date.today()))
 
         # Commit the changes.
         self.connection.commit()
@@ -885,7 +885,7 @@ class Database:
         self.cursor.execute('''
         INSERT INTO `friends` (`user_id`, `other_user_id`, `date`)
         VALUES (?, ?, ?)
-        ''', (from_user_id, user_id, today))
+        ''', (user_id, from_user_id, today))
 
         # Commit the changes.
         self.connection.commit()
@@ -897,11 +897,35 @@ class Database:
 
         return True, {'details': 'Friend request accepted successfully.'}
 
+    def get_incoming_friend_requests(self, user_id: int) -> list[FriendRequest]:
+        friend_requests: list[FriendRequest] = []
+
+        # Get the requests.
+        self.cursor.execute('SELECT * FROM `friend_requests` WHERE `user_id` = ?', (user_id,))
+
+        # Loop through all the friend requests and add them to the list.
+        for row in self.cursor.fetchall():
+            friend_requests.append(Utils.row_to_friend_request(row))
+
+        return friend_requests
+
+    def get_outgoing_friend_requests(self, user_id: int) -> list[FriendRequest]:
+        friend_requests: list[FriendRequest] = []
+
+        # Get the requests.
+        self.cursor.execute('SELECT * FROM `friend_requests` WHERE `from_user_id` = ?', (user_id,))
+
+        # Loop through all the friend requests and add them to the list.
+        for row in self.cursor.fetchall():
+            friend_requests.append(Utils.row_to_friend_request(row))
+
+        return friend_requests
+
     def get_friends(self, user_id: int) -> list[Friend]:
         friends: list[Friend] = []
 
         # Get all friends of the specified user.
-        self.cursor.execute('SELECT * FROM `friends` WHERE `user_id` = ?', (user_id,))
+        self.cursor.execute('SELECT * FROM `friends` WHERE `other_user_id` = ?', (user_id,))
 
         # Loop through all the friends and add them to the list.
         rows = self.cursor.fetchall()
