@@ -21,6 +21,8 @@ from api_resource import APIResource
 from email_utils import EmailUtils
 from file_manager import FileManager
 from structures.application_session import ApplicationSession
+from structures.friend import Friend
+from structures.friend_request import FriendRequest
 from structures.iap import IAP
 from structures.iap_record import IAPRecord
 from structures.application_key import ApplicationKey
@@ -385,7 +387,7 @@ class GetApplicationVersions(APIResource):
 
         # Verify that the user owns the specified application.
         if not database_utils.user_owns(user.id, application_id):
-            return {'details': 'You do not own this application.'}
+            return {'details': 'You do not own this application.'}, 403
 
         versions: list[ApplicationVersion]
 
@@ -445,7 +447,7 @@ class CreateVersion(APIResource):
         name: str = request.form.get('name')
         platform: str = request.form.get('platform')
         release_date: date = datetime.strptime(request.form.get('release_date'), '%Y-%m-%d').date()
-        filename: str = Utils.generate_uuid4() + '_' + request.form.get('filename')
+        filename: str = secure_filename(Utils.generate_uuid4() + '_' + request.form.get('filename'))
         executable = request.form.get('executable')
 
         # Ensure that the application exists.
@@ -485,7 +487,7 @@ class CreateVersion(APIResource):
         version_file = request.files['file']
 
         # Save the version file.
-        version_file.save(file_manager.generate_version_filepath(application.package_name, secure_filename(filename)))
+        version_file.save(file_manager.generate_version_filepath(application.package_name, filename))
 
         return response, 200
 
@@ -732,11 +734,13 @@ class GetTransaction(APIResource):
         if not transaction:
             return {'details': 'The specified transaction does not exist.'}, 400
 
+        print(f'{user.id} ?= {transaction.user_id}')
+
         # Ensure that the user requesting the transaction has the proper authority to view it.
         if not user.is_or_admin(transaction.user_id):
             return {'details': 'You do not have the authority to access this user\'s transaction(s).'}, 403
 
-        return {'transaction': Utils.serialize(transaction, True)}, 200
+        return Utils.serialize(transaction, True), 200
 
 
 class GetPurchase(APIResource):
@@ -766,7 +770,7 @@ class GetPurchase(APIResource):
         if not user.is_or_admin(database_utils.get_purchase_source(purchase_id)):
             return {'details': 'You do not have the authority to access this user\'s purchase(s).'}, 403
 
-        return {'purchase': Utils.serialize(purchase, True)}, 200
+        return Utils.serialize(purchase, True), 200
 
 
 class GetDeposit(APIResource):
@@ -796,7 +800,7 @@ class GetDeposit(APIResource):
         if not user.is_or_admin(deposit.user_id):
             return {'details': 'You do not have the authority to access this user\'s deposit(s).'}, 403
 
-        return {'deposit': Utils.serialize(deposit, True)}, 200
+        return Utils.serialize(deposit, True), 200
 
 
 class GetApplicationKey(APIResource):
@@ -826,7 +830,7 @@ class GetApplicationKey(APIResource):
         if not user.is_or_admin(application_key.user_id):
             return {'details': 'You do not have the authority to access this user\'s application key(s).'}, 403
 
-        return {'application_key': Utils.serialize(application_key, True)}, 200
+        return Utils.serialize(application_key, True), 200
 
 
 class GetApplicationKeys(APIResource):
@@ -1067,6 +1071,9 @@ class DeleteFriendRequest(APIResource):
         if not (friend_request.user_id == user.id or friend_request.from_user_id == user.id or user.administrator):
             return {'details': 'You cannot delete this friend request.'}, 400
 
+        # Delete the friend request.
+        database.delete_friend_request(request_id)
+
         return {}, 200
 
 
@@ -1104,6 +1111,102 @@ class AcceptFriendRequest(APIResource):
             return response, 400
 
         return response, 200
+
+
+class GetIncomingFriendRequests(APIResource):
+    required_parameters = ['user_id']
+
+    def get(self):
+        missing, parameters = self.missing_parameters()
+
+        if missing:
+            return {'missing_parameters': parameters}, 400
+
+        success, response, response_code, session, user = self.verify_session(database)
+
+        if not success:
+            return response, response_code
+
+        # Get the parameters.
+        user_id: int = Utils.safe_int_cast(request.form.get('user_id'))
+
+        # Ensure that the user exists.
+        target_user = database.get_user(user_id)
+
+        if not target_user:
+            return {'details': 'The specified user does not exist.'}, 400
+
+        # Ensure that the user has the proper authority to view these friend requests.
+        if not user.is_or_admin(user_id):
+            return {'details': 'You do not have the authority to view this user\'s friend requests.'}, 403
+
+        # Get the friend requests.
+        friend_requests: list[FriendRequest] = database.get_incoming_friend_requests(user_id)
+
+        return {'friend_requests': Utils.serialize(friend_requests, True)}
+
+
+class GetOutgoingFriendRequests(APIResource):
+    required_parameters = ['user_id']
+
+    def get(self):
+        missing, parameters = self.missing_parameters()
+
+        if missing:
+            return {'missing_parameters': parameters}, 400
+
+        success, response, response_code, session, user = self.verify_session(database)
+
+        if not success:
+            return response, response_code
+
+        # Get the parameters.
+        user_id: int = Utils.safe_int_cast(request.form.get('user_id'))
+
+        # Ensure that the user exists.
+        target_user = database.get_user(user_id)
+
+        if not target_user:
+            return {'details': 'The specified user does not exist.'}, 400
+
+        # Ensure that the user has the proper authority to view these friend requests.
+        if not user.is_or_admin(user_id):
+            return {'details': 'You do not have the authority to view this user\'s friend requests.'}, 403
+
+        # Get the friend requests.
+        friend_requests: list[FriendRequest] = database.get_outgoing_friend_requests(user_id)
+
+        return {'friend_requests': Utils.serialize(friend_requests, True)}
+
+
+class GetFriends(APIResource):
+    required_parameters = ['user_id']
+
+    def get(self):
+        missing, parameters = self.missing_parameters()
+
+        if missing:
+            return {'missing_parameters': parameters}, 400
+
+        success, response, response_code, session, user = self.verify_session(database)
+
+        if not success:
+            return response, response_code
+
+        # Get the parameters.
+        user_id: int = Utils.safe_int_cast(request.form.get('user_id'))
+
+        # Verify that the user exists.
+        target_user = database.get_user(user_id)
+
+        if not target_user:
+            return {'details': 'The specified user does not exist.'}, 400
+
+        # These records are public; no need to verify the user's identity.
+        # Get the user's friends.
+        friends: list[Friend] = database.get_friends(user_id)
+
+        return {'friends': Utils.serialize(friends)}
 
 
 class RemoveFriend(APIResource):
@@ -1626,7 +1729,7 @@ class UploadCloudData(APIResource):
 
         # Ensure that the user owns this application.
         if not database_utils.user_owns(user_id, application_id):
-            return {'details': 'You do not own this application, and thus cannot upload cloud data for it.'}, 400
+            return {'details': 'You do not own this application, and thus cannot upload cloud data for it.'}, 403
 
         # Save the cloud data.
         database.create_cloud_data(
@@ -2018,7 +2121,10 @@ def main():
     api.add_resource(GetSession, '/api/session/get')
     api.add_resource(SendFriendRequest, '/api/friend/send-request')
     api.add_resource(DeleteFriendRequest, '/api/friend/delete-request')
+    api.add_resource(GetIncomingFriendRequests, '/api/friend/get-requests/incoming')
+    api.add_resource(GetOutgoingFriendRequests, '/api/friend/get-requests/outgoing')
     api.add_resource(AcceptFriendRequest, '/api/friend/accept-request')
+    api.add_resource(GetFriends, '/api/user/get-friends')
     api.add_resource(RemoveFriend, '/api/friend/remove')
     api.add_resource(SendInvite, '/api/user/send-invite')
     api.add_resource(GetInvites, '/api/user/get-invites')
